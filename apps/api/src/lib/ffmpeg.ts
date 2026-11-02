@@ -14,8 +14,8 @@ export const ACCEPTED_AUDIO = /^(audio\/(webm|ogg|mp4|mpeg|mp3|x-m4a|m4a|aac|wav
  * Normalises any recorded clip to MP3 mono 44.1 kHz, max `maxSec` seconds.
  * Input and output live in a private temp dir that is removed in `finally` — audio never persists.
  */
-export async function normalizeForRecognition(ffmpeg: string, input: Buffer, maxSec = 12): Promise<Buffer> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'auris-rec-'));
+export async function normalizeForRecognition(ffmpeg: string, input: Buffer, maxSec = 12, tmpRoot = os.tmpdir()): Promise<Buffer> {
+  const dir = await fs.mkdtemp(path.join(tmpRoot, 'auris-rec-'));
   const src = path.join(dir, crypto.randomUUID());
   const out = path.join(dir, 'out.mp3');
   try {

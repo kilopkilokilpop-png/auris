@@ -62,6 +62,7 @@ export const api = {
   deleteMe: () => request<{ ok: true }>('DELETE', '/api/me'),
 
   home: () => request<{ editorial: Album | null; recent: Track[]; capabilities: CatalogCapabilities }>('GET', '/api/home'),
+  publicConfig: () => request<{ botUsername: string | null }>('GET', '/api/public-config'),
   capabilities: () => request<CatalogCapabilities>('GET', '/api/catalog/capabilities'),
   search: (q: string) => request<SearchResponse>('GET', `/api/search?q=${encodeURIComponent(q)}`),
   recentSearches: () => request<{ queries: string[] }>('GET', '/api/search/recent'),

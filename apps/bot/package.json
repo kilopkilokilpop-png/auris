@@ -21,5 +21,15 @@
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "5.1.0"
+  },
+  "exports": {
+    "./bot": {
+      "types": "./dist/bot.d.ts",
+      "default": "./dist/bot.js"
+    },
+    "./api-client": {
+      "types": "./dist/api-client.d.ts",
+      "default": "./dist/api-client.js"
+    }
   }
 }

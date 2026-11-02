@@ -18,10 +18,14 @@ export async function createPostgresDb(url: string): Promise<Db> {
   const Pool = pg.default.Pool;
   // BIGINT -> number (Telegram ids fit in 2^53).
   pg.default.types.setTypeParser(20, (v: string) => Number(v));
+  // TLS for hosted Postgres (Supabase pooler etc.). sslmode in the URL is stripped so this setting wins.
+  const u = new URL(url);
+  const wantSsl = /^(require|verify-ca|verify-full|prefer)$/.test(u.searchParams.get('sslmode') ?? '') || /supabase\.(co|com)$/.test(u.hostname);
+  u.searchParams.delete('sslmode');
   const pool = new Pool({
-    connectionString: url,
-    max: 10,
-    ssl: /sslmode=require|supabase\.co/.test(url) ? { rejectUnauthorized: false } : undefined,
+    connectionString: u.toString(),
+    max: Number(process.env.DATABASE_POOL_MAX ?? 5),
+    ssl: wantSsl ? { rejectUnauthorized: false } : undefined,
   });
   const wrap = (q: { query: (s: string, p?: unknown[]) => Promise<{ rows: unknown[] }> }): Omit<Db, 'transaction' | 'close' | 'kind'> => ({
     async query<R>(sql: string, params?: unknown[]) {

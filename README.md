@@ -8,6 +8,7 @@
 apps/api        Fastify + Zod API, адаптеры музыки и распознавания, рекомендации, Postgres
 apps/bot        grammY бот (webhook), ходит в API по внутреннему секрету
 apps/mini-app   React + Vite + @telegram-apps/sdk-react
+apps/server     production «всё в одном»: Mini App + API + webhook бота (Dockerfile, render.yaml)
 packages/shared общие типы, Zod-схемы, логика бейджей качества
 db/migrations   SQL-миграции PostgreSQL (подходит Supabase)
 design/         макеты; screenshots/ — скриншоты Playwright и сравнение с макетами
@@ -39,6 +40,7 @@ CC0, в том числе настоящие FLAC 16/44,1 и 24/96), мок-ра
 | `pnpm screenshots` | скриншоты экранов + `screenshots/compare/*` (макет · наш экран · diff) |
 | `pnpm smoke` | живая проверка подключённых провайдеров против настоящих API |
 | `pnpm db:migrate` | применить миграции к `DATABASE_URL` |
+| `TEST_DATABASE_URL=postgres://… pnpm --filter @auris/api test` | API-тесты на настоящем PostgreSQL (по базе на тест) |
 
 ## 1. Бот в BotFather
 
@@ -106,6 +108,11 @@ BOT_MODE=polling        # локально; в проде — webhook
 на порт 3002 и `BOT_MODE=webhook`, `BOT_WEBHOOK_URL=https://<туннель-бота>`.
 
 ## 4. Деплой
+
+**Быстрый путь — один сервис:** `Dockerfile` + `render.yaml` (Render Blueprint) + Supabase, пошагово в
+[`docs/deploy-render.md`](docs/deploy-render.md). Образ собирает `apps/server`: Mini App, API и webhook бота на одном HTTPS-адресе.
+
+Раздельный деплой:
 
 * **БД**: Supabase или любой PostgreSQL 14+. `DATABASE_URL=postgres://...?sslmode=require`, затем `pnpm db:migrate`
   (API также применяет миграции при старте).

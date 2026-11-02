@@ -53,7 +53,7 @@ export interface Services {
   recognition: RecognitionService;
 }
 
-const PUBLIC_PREFIXES = ['/api/health', '/api/stream/', '/api/media/', '/api/dev/', '/internal/'];
+const PUBLIC_PREFIXES = ['/api/health', '/api/public-config', '/api/stream/', '/api/media/', '/api/dev/', '/internal/'];
 
 export function userId(req: FastifyRequest): number {
   if (!req.tgUser) throw new AppError('UNAUTHORIZED', 'Нет авторизации Telegram', 401);
@@ -137,7 +137,7 @@ export async function buildApp(deps: AppDeps): Promise<{ app: FastifyInstance; s
       }
       return `ip:${req.ip}`;
     },
-    allowList: (req) => req.url.startsWith('/internal/') || req.url.startsWith('/api/stream/') || req.url.startsWith('/api/media/'),
+    allowList: (req) => req.url.startsWith('/internal/') || req.url.startsWith('/telegram/') || req.url.startsWith('/api/stream/') || req.url.startsWith('/api/media/'),
     errorResponseBuilder: (_req, ctx) => ({
       statusCode: 429,
       error: { code: 'RATE_LIMITED', message: 'Слишком много запросов, подождите немного', retryAfterSec: Math.ceil(ctx.ttl / 1000) },
@@ -197,6 +197,8 @@ export async function buildApp(deps: AppDeps): Promise<{ app: FastifyInstance; s
   });
 
   app.get('/api/health', async () => ({ ok: true, providers: deps.music.providers.map((p) => p.info.id), recognition: deps.recognition.name }));
+  // Public, non-secret runtime config for the Mini App (so the bundle needs no build-time vars).
+  app.get('/api/public-config', async () => ({ botUsername: env.BOT_USERNAME ?? null }));
 
   registerUserRoutes(app, services);
   registerCatalogRoutes(app, services);

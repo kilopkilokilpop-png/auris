@@ -14,7 +14,13 @@ interface SessionState {
 export const session = new Store<SessionState>({ profile: null, capabilities: null, liked: new Set(), likedVersion: 0 });
 
 export async function loadSession() {
-  const [profile, likes, capabilities] = await Promise.all([api.me(), api.likedIds().catch(() => ({ ids: [] })), api.capabilities().catch(() => null)]);
+  const [profile, likes, capabilities, config] = await Promise.all([
+    api.me(),
+    api.likedIds().catch(() => ({ ids: [] })),
+    api.capabilities().catch(() => null),
+    api.publicConfig().catch(() => ({ botUsername: null })),
+  ]);
+  tg.setBotUsername(config.botUsername);
   session.set({ profile, liked: new Set(likes.ids), capabilities });
   player.setQuality(profile.settings.quality);
   return profile;

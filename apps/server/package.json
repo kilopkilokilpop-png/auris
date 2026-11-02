@@ -1,0 +1,21 @@
+{
+  "name": "@auris/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "All-in-one production entry: Mini App static files + API + bot webhook on one HTTPS origin",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@auris/api": "workspace:*",
+    "@auris/bot": "workspace:*",
+    "@fastify/static": "10.1.8",
+    "grammy": "1.46.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

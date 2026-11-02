@@ -8,3 +8,5 @@ playwright-report
 apps/api/mock-audio
 screenshots/diff
 .DS_Store
+auris.zip
+proxy-ca.crt

@@ -10,8 +10,11 @@ const UserBody = z.object({ userId: z.number().int().positive() });
 /** Bot -> API. Authenticated by a shared secret; never exposed through the Mini App proxy. */
 export function registerInternalRoutes(app: FastifyInstance, s: Services) {
   const secret = s.env.INTERNAL_API_SECRET;
+  const loopback = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
   const guard = async (req: FastifyRequest) => {
     if (!secret) throw new AppError('UNAUTHORIZED', 'INTERNAL_API_SECRET не задан', 503);
+    // Socket address, not req.ip: X-Forwarded-For must not be able to fake "local".
+    if (s.env.INTERNAL_LOOPBACK_ONLY && !loopback.has(req.socket.remoteAddress ?? '')) throw new AppError('NOT_FOUND', 'Not found', 404);
     const given = Buffer.from(String(req.headers['x-internal-secret'] ?? ''));
     const want = Buffer.from(secret);
     if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) throw new AppError('UNAUTHORIZED', 'forbidden', 403);

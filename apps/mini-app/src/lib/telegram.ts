@@ -91,7 +91,8 @@ export async function bootTelegram(): Promise<TgState> {
   }
   if (!inside) return state;
 
-  initSdk();
+  // Never let an SDK bridge problem block the app: initData alone is enough to work.
+  safe(() => initSdk());
   state.initData = safe(() => retrieveRawInitData()) ?? '';
   state.startParam = safe(() => retrieveLaunchParams().tgWebAppStartParam);
   if (!state.botUsername) state.botUsername = (import.meta.env.VITE_BOT_USERNAME as string | undefined) ?? null;
@@ -127,6 +128,9 @@ export const tg = {
   },
   get botUsername() {
     return state.botUsername;
+  },
+  setBotUsername(v: string | null) {
+    if (v) state.botUsername = v;
   },
   get startParam() {
     return state.startParam;

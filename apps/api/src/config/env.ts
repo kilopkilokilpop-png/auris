@@ -41,6 +41,8 @@ export const EnvSchema = z.object({
   /** Shared secret for bot -> API internal calls. */
   INTERNAL_API_SECRET: optionalStr,
   INTERNAL_API_URL: z.string().default('http://127.0.0.1:3001'),
+  /** All-in-one deploy: /internal/* answers only to connections from this machine. */
+  INTERNAL_LOOPBACK_ONLY: bool(false),
   /** Max age of Telegram initData, seconds. */
   INIT_DATA_MAX_AGE_SEC: z.coerce.number().int().default(86_400),
   /** Signing key for short-lived stream URLs. Generated per boot if empty. */
@@ -60,7 +62,7 @@ export const EnvSchema = z.object({
   LICENSED_DOWNLOADS_CONTRACTED: bool(false),
   LICENSED_CACHE_FILE_ID: bool(false),
 
-  /** mock | audd | acrcloud | comma list for fallback, e.g. "audd,acrcloud" */
+  /** none | mock (dev only) | audd | acrcloud | comma list for fallback, e.g. "audd,acrcloud" */
   RECOGNITION_PROVIDERS: z.string().default('mock'),
   AUDD_API_TOKEN: optionalStr,
   ACRCLOUD_HOST: optionalStr,

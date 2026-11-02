@@ -1,13 +1,18 @@
 import type { Env } from '../../config/env.js';
 import { AcrCloudProvider } from './AcrCloudProvider.js';
 import { AuddProvider } from './AuddProvider.js';
+import { DisabledRecognition } from './DisabledRecognition.js';
 import { MockRecognition } from './MockRecognition.js';
 import { FallbackRecognition, type RecognitionProvider } from './RecognitionProvider.js';
 
 export function createRecognition(env: Env): RecognitionProvider {
   const list: RecognitionProvider[] = [];
   for (const id of env.RECOGNITION_PROVIDERS.split(',').map((s) => s.trim()).filter(Boolean)) {
-    if (id === 'mock') list.push(new MockRecognition());
+    if (id === 'none') list.push(new DisabledRecognition());
+    else if (id === 'mock') {
+      if (env.NODE_ENV === 'production') throw new Error('RECOGNITION_PROVIDERS=mock returns fake results — use audd/acrcloud or none in production');
+      list.push(new MockRecognition());
+    }
     else if (id === 'audd') {
       if (!env.AUDD_API_TOKEN) throw new Error('AUDD_API_TOKEN is required for audd');
       list.push(new AuddProvider(env.AUDD_API_TOKEN));

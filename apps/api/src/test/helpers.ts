@@ -4,7 +4,7 @@ import path from 'node:path';
 import { buildApp } from '../app.js';
 import { signInitData } from '../auth/initData.js';
 import { parseEnv, type Env } from '../config/env.js';
-import { createPgliteDb, type Db } from '../db/db.js';
+import { createPgliteDb, createPostgresDb, type Db } from '../db/db.js';
 import { migrate } from '../db/migrate.js';
 import { MIGRATIONS_DIR } from '../db/index.js';
 import { DeezerProvider } from '../providers/music/DeezerProvider.js';
@@ -17,6 +17,17 @@ import { TelegramSendError } from '../services/telegram.js';
 
 export const TEST_TOKEN = '777:test-bot-token';
 export const MEDIA_DIR = path.join(os.tmpdir(), 'auris-test-media');
+
+/** TEST_DATABASE_URL=postgres://… runs the suite against a real PostgreSQL: one fresh database per app. */
+async function freshPostgres(adminUrl: string): Promise<Db> {
+  const admin = await createPostgresDb(adminUrl);
+  const name = `auris_t_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
+  await admin.exec(`CREATE DATABASE ${name}`);
+  await admin.close();
+  const u = new URL(adminUrl);
+  u.pathname = `/${name}`;
+  return createPostgresDb(u.toString());
+}
 
 export class FakeSender implements TelegramSender {
   calls: { chatId: number; input: AudioInput; meta: AudioMeta; size?: number }[] = [];
@@ -56,7 +67,7 @@ export async function makeApp(opts: { db?: Db; env?: Partial<Record<string, stri
     ALLOW_DEV_AUTH: 'false',
     ...opts.env,
   });
-  const db = opts.db ?? (await createPgliteDb());
+  const db = opts.db ?? (process.env.TEST_DATABASE_URL ? await freshPostgres(process.env.TEST_DATABASE_URL) : await createPgliteDb());
   await migrate(db, MIGRATIONS_DIR);
   const mock = new MockProvider(new MockMedia(MEDIA_DIR, 'ffmpeg'));
   const music = new CompositeProvider([mock, fakeDeezer()]);

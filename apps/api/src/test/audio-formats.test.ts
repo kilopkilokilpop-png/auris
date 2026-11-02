@@ -27,11 +27,10 @@ describe('server-side audio normalisation (ffmpeg)', () => {
   for (const [name, mime, args] of cases) {
     it(`${mime} -> mp3, trimmed to 12 s, temp files removed`, async () => {
       expect(ACCEPTED_AUDIO.test(mime)).toBe(true);
-      const before = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('auris-rec-')).length;
-      const out = await normalizeForRecognition('ffmpeg', make(name, args));
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'auris-root-'));
+      const out = await normalizeForRecognition('ffmpeg', make(name, args), 12, root);
       expect(out.subarray(0, 3).toString() === 'ID3' || (out[0] === 0xff && (out[1]! & 0xe0) === 0xe0)).toBe(true);
-      const after = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('auris-rec-')).length;
-      expect(after).toBe(before);
+      expect(fs.readdirSync(root)).toEqual([]);
     });
   }
   it('rejects garbage', async () => {

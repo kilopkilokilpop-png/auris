@@ -1,0 +1,35 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repository.
+# Values marked sync:false are asked for during creation.
+services:
+  - type: web
+    name: auris
+    runtime: docker
+    plan: free            # free instances sleep after ~15 min idle; "starter" stays awake
+    region: frankfurt
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL         # Supabase -> Connect -> Session pooler (IPv4)
+        sync: false
+      - key: BOT_TOKEN            # @BotFather
+        sync: false
+      - key: BOT_USERNAME         # without @
+        sync: false
+      - key: INTERNAL_API_SECRET
+        generateValue: true
+      - key: STREAM_SIGNING_SECRET
+        generateValue: true
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: MUSIC_PROVIDERS
+        value: mock,deezer
+      - key: DEEZER_ENABLED_NONCOMMERCIAL
+        value: "true"
+      - key: RECOGNITION_PROVIDERS  # set to audd (and AUDD_API_TOKEN) to enable Слух
+        value: none
+      - key: AUDD_API_TOKEN
+        sync: false
+      - key: DATABASE_POOL_MAX
+        value: "5"

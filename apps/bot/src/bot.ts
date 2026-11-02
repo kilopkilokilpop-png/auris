@@ -53,8 +53,9 @@ export function trackKeyboard(tracks: Track[], miniAppUrl: string): InlineKeyboa
   return kb;
 }
 
+/** Telegram rejects non-HTTPS (e.g. localhost) button URLs, so without HTTPS we show an explanation instead. */
 function openKeyboard(miniAppUrl: string, text: string, params: Record<string, string> = {}) {
-  return canWebApp(miniAppUrl) ? new InlineKeyboard().webApp(text, appUrl(miniAppUrl, params)) : new InlineKeyboard().url(text, appUrl(miniAppUrl, params));
+  return canWebApp(miniAppUrl) ? new InlineKeyboard().webApp(text, appUrl(miniAppUrl, params)) : new InlineKeyboard().text(text, 'noapp');
 }
 
 export function recognitionMessage(r: Recognition, miniAppUrl: string): { text: string; keyboard: InlineKeyboard } {
@@ -152,6 +153,9 @@ export function createBot(api: AurisApi, cfg: BotConfig): Bot {
     ctx.answerCallbackQuery({ text: 'Скачивание этого трека не разрешено источником или лицензией. Его можно только слушать.', show_alert: true }),
   );
   bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery({ text: 'Откройте AURIS через кнопку меню' }));
+  bot.callbackQuery('noapp', (ctx) =>
+    ctx.answerCallbackQuery({ text: 'Mini App ещё не опубликован по HTTPS. Пока работают команды бота: /search, /liked, /settings и распознавание голосовых.', show_alert: true }),
+  );
   bot.callbackQuery('reset', (ctx) =>
     ctx.editMessageText('Сбросить рекомендации? История прослушиваний будет удалена, избранное останется.', {
       reply_markup: new InlineKeyboard().text('Да, сбросить', 'reset!').text('Отмена', 'cancel'),
