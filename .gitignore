@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.data
+*.log
+test-results
+playwright-report
+apps/api/mock-audio
+screenshots/diff
+.DS_Store

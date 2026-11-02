@@ -1,0 +1,5 @@
+home       4.7% pixels differ  (design 780x1688, ours 780x1688)
+wave       4.5% pixels differ  (design 780x1688, ours 780x1688)
+hear       2.2% pixels differ  (design 780x1688, ours 780x1688)
+profile    4.4% pixels differ  (design 780x1688, ours 780x1688)
+player     7.8% pixels differ  (design 780x1688, ours 780x1688)

@@ -1,0 +1,94 @@
+/* AURIS design tokens. Monochrome glass over soft light. The app is always dark. */
+:root {
+  color-scheme: dark;
+
+  /* Palette (brand sheet) */
+  --c-black: #0a0a0b;
+  --c-graphite: #1c1c1f;
+  --c-white: #f5f5f7;
+  --c-glass: rgb(255 255 255 / 0.08);
+
+  /* Semantic */
+  --bg: var(--c-black);
+  --surface: var(--c-graphite);
+  --glass: var(--c-glass);
+  --glass-strong: rgb(255 255 255 / 0.12);
+  --glass-press: rgb(255 255 255 / 0.16);
+  --stroke: rgb(255 255 255 / 0.12);
+  --stroke-strong: rgb(255 255 255 / 0.22);
+  /* Top-edge highlight of every glass surface */
+  --edge: rgb(255 255 255 / 0.28);
+  --text: var(--c-white);
+  /* 8.1:1 on --bg */
+  --text-2: #a8a8ad;
+  /* 6.4:1 on --bg, labels / meta */
+  --text-3: #93939a;
+  --on-white: var(--c-black);
+  --track-bg: rgb(255 255 255 / 0.16);
+  --danger: #f5f5f7;
+
+  /* Type */
+  --font: 'Manrope Variable', 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --w-text: 500;
+  --w-medium: 600;
+  --w-bold: 700;
+  --w-heading: 800;
+  --fs-display: 30px;
+  --fs-title: 22px;
+  --fs-h2: 18px;
+  --fs-body: 15px;
+  --fs-meta: 14px;
+  --fs-small: 13px;
+  --fs-label: 11px;
+  --fs-tab: 11px;
+  --ls-label: 0.2em;
+
+  /* Shape */
+  --r-xs: 10px;
+  --r-sm: 12px;
+  --r-md: 16px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  /* Space (4/8 rhythm) */
+  --gutter: 20px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+
+  /* Touch */
+  --hit: 44px;
+
+  /* Glass */
+  --blur: blur(24px) saturate(140%);
+  --shadow-soft: 0 18px 40px -18px rgb(0 0 0 / 0.8);
+  --glow-white: 0 0 28px rgb(255 255 255 / 0.25);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --t-press: 120ms;
+  --t-fast: 180ms;
+  --t-base: 260ms;
+  --t-slow: 420ms;
+
+  /* Layout */
+  --tabbar-h: 70px;
+  --miniplayer-h: 60px;
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-bottom, 0px));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-press: 0ms;
+    --t-fast: 0ms;
+    --t-base: 0ms;
+    --t-slow: 0ms;
+  }
+}
