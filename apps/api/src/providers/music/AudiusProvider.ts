@@ -51,6 +51,18 @@ const GENRE_TO_AUDIUS: Record<string, string> = {
   dance: 'Dance', house: 'House', techno: 'Techno', reggae: 'Reggae', blues: 'Blues', country: 'Country',
 };
 
+const CYRILLIC = /[Ѐ-ӿ]/;
+/** Search words per Cyrillic language: youth genres first. */
+const CYRILLIC_QUERIES: Record<string, string[]> = {
+  ru: ['рэп', 'трэп', 'фонк', 'русский рэп', 'хип-хоп', 'поп', 'любовь', 'музыка'],
+  uk: ['реп', 'пісня', 'музика'],
+};
+
+/** Hours-long mixes and "новинки 2024 #9"-style compilations are usually re-uploads, not the artist's own work. */
+export function isCompilation(title: string, durationSec: number): boolean {
+  return durationSec > 15 * 60 || /новинк|сборник|подборк|хиты\s*20\d\d|top\s*\d+|#\d+|mix\s*20\d\d/i.test(title);
+}
+
 export function audiusPlayable(t: AuTrack): boolean {
   return t.is_streamable !== false && !t.is_stream_gated && !t.is_delete && !t.is_unlisted && t.is_available !== false;
 }
@@ -200,6 +212,24 @@ export class AudiusProvider implements MusicProvider {
     const t = await this.get<AuTrack[]>('/tracks/trending', { time: 'month', limit: 100 });
     return this.list(t, 100).filter((x) => x.tags.some((tag) => tags.includes(tag))).slice(0, limit);
   }
+  /**
+   * Audius has no lyrics-language field. For Cyrillic languages we search genre words in that
+   * language and keep tracks whose title or artist is written in Cyrillic.
+   */
+  async getLanguageTracks(lang: string, limit: number) {
+    const queries = CYRILLIC_QUERIES[lang];
+    if (!queries) return [];
+    const lists = await Promise.all(queries.map((q) => this.get<AuTrack[]>('/tracks/search', { query: q, limit: 40 }).catch(() => [] as AuTrack[])));
+    const seen = new Set<string>();
+    const out: AuTrack[] = [];
+    for (const t of lists.flat().sort((a, b) => (b.play_count ?? 0) - (a.play_count ?? 0))) {
+      if (seen.has(t.id) || !audiusPlayable(t) || !CYRILLIC.test(`${t.title} ${t.user.name}`) || isCompilation(t.title, t.duration)) continue;
+      seen.add(t.id);
+      out.push(t);
+    }
+    return out.slice(0, limit).map((t) => this.toTrack(t));
+  }
+
   async getEditorial() {
     // Trending playlists curated by the network; first with at least 3 playable tracks.
     const lists = await this.get<AuPlaylist[]>('/playlists/trending', { time: 'week', limit: 5 }).catch(() => []);

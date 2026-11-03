@@ -125,3 +125,12 @@ describe('Audius', () => {
     expect(await gated.getStream('audius:a1', 'standard')).toBeNull();
   });
 });
+
+describe('Audius Russian filter', () => {
+  it('drops compilations and hours-long mixes', async () => {
+    const { isCompilation } = await import('./AudiusProvider.js');
+    expect(isCompilation('НОВИНКИ МУЗЫКИ 2023 - 2024 #9', 300)).toBe(true);
+    expect(isCompilation('Сожаления', 200)).toBe(false);
+    expect(isCompilation('Late night set', 3600)).toBe(true);
+  });
+});
