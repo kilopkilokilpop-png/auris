@@ -98,3 +98,30 @@ describe('Licensed (B2B stub)', () => {
     await expect(p.getChart(5)).rejects.toThrow(/not configured/);
   });
 });
+
+describe('Audius', () => {
+  const au = (over: Record<string, unknown>) => ({
+    id: 'a1', title: 'Song', duration: 200, genre: 'Electronic', mood: 'Peaceful', play_count: 5000, permalink: '/artist/song',
+    artwork: { '480x480': 'https://img/480.jpg' }, user: { id: 'u1', name: 'Artist' }, is_streamable: true, is_stream_gated: false, ...over,
+  });
+  const make = async (tracks: unknown[]) => {
+    const { AudiusProvider } = await import('./AudiusProvider.js');
+    return new AudiusProvider('AURIS', 'https://api.test/v1', (async (url: string) => ({ data: url.includes('/tracks/a1') ? tracks[0] : tracks })) as never);
+  };
+  it('offers only streamable, non-gated tracks as full-length', async () => {
+    const p = await make([au({}), au({ id: 'a2', is_stream_gated: true }), au({ id: 'a3', is_streamable: false })]);
+    const chart = await p.getChart(10);
+    expect(chart.map((t) => t.id)).toEqual(['audius:a1']);
+    expect(chart[0]!.playback).toMatchObject({ kind: 'full', playableSec: 200 });
+    expect(chart[0]!.tags).toContain('calm');
+    expect(chart[0]!.license.sourceUrl).toBe('https://audius.co/artist/song');
+  });
+  it('streams via the API with app_name and never allows Telegram downloads', async () => {
+    const p = await make([au({})]);
+    const s = await p.getStream('audius:a1', 'standard');
+    expect(s?.url).toBe('https://api.test/v1/tracks/a1/stream?app_name=AURIS');
+    expect((await p.getDownload('audius:a1')).allowed).toBe(false);
+    const gated = await make([au({ is_stream_gated: true })]);
+    expect(await gated.getStream('audius:a1', 'standard')).toBeNull();
+  });
+});

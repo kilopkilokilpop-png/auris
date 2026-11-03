@@ -11,7 +11,7 @@ export const TrackIdSchema = z
   .regex(/^[a-z0-9]+:[A-Za-z0-9_.-]+$/, 'invalid id');
 export type TrackId = z.infer<typeof TrackIdSchema>;
 
-export const ProviderIdSchema = z.enum(['mock', 'deezer', 'jamendo', 'licensed']);
+export const ProviderIdSchema = z.enum(['mock', 'deezer', 'jamendo', 'audius', 'licensed']);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 /** One real, measured or provider-declared audio variant. Never inferred. */

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { Album, Artist, Genre, ProviderId, QualityTier, Track } from '@auris/shared';
 import type { Env } from '../../config/env.js';
+import { AudiusProvider } from './AudiusProvider.js';
 import { DeezerProvider } from './DeezerProvider.js';
 import { JamendoProvider } from './JamendoProvider.js';
 import { LicensedProvider } from './LicensedProvider.js';
@@ -142,6 +143,9 @@ export function createMusicProvider(env: Env): CompositeProvider {
       case 'jamendo':
         if (!env.JAMENDO_CLIENT_ID) throw new Error('JAMENDO_CLIENT_ID is required for the jamendo provider');
         list.push(new JamendoProvider(env.JAMENDO_CLIENT_ID, env.JAMENDO_CACHE_FILE_ID));
+        break;
+      case 'audius':
+        list.push(new AudiusProvider(env.AUDIUS_APP_NAME));
         break;
       case 'licensed':
         list.push(new LicensedProvider({ url: env.LICENSED_API_URL, key: env.LICENSED_API_KEY, downloadsContracted: env.LICENSED_DOWNLOADS_CONTRACTED, cacheFileId: env.LICENSED_CACHE_FILE_ID }));

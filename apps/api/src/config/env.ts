@@ -56,6 +56,8 @@ export const EnvSchema = z.object({
   JAMENDO_CLIENT_ID: optionalStr,
   /** Jamendo terms forbid content caching beyond what is necessary; keep false unless licensed otherwise. */
   JAMENDO_CACHE_FILE_ID: bool(false),
+  /** Audius asks every API client to identify itself with app_name. No key needed. */
+  AUDIUS_APP_NAME: z.string().default('AURIS'),
   LICENSED_API_URL: optionalStr,
   LICENSED_API_KEY: optionalStr,
   /** Set only after the contract explicitly grants download/sending rights. */
