@@ -205,3 +205,14 @@ describe('persistence', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('internal routes in the all-in-one deploy', () => {
+  it('refuse proxied (public) traffic even from loopback, accept direct loopback calls', async () => {
+    const c = await makeApp({ env: { INTERNAL_LOOPBACK_ONLY: 'true' } });
+    const h = { 'x-internal-secret': 'internal-secret' };
+    expect((await c.app.inject({ method: 'GET', url: '/internal/likes?userId=1', headers: h, remoteAddress: '127.0.0.1' })).statusCode).toBe(200);
+    expect((await c.app.inject({ method: 'GET', url: '/internal/likes?userId=1', headers: { ...h, 'x-forwarded-for': '203.0.113.7' }, remoteAddress: '127.0.0.1' })).statusCode).toBe(404);
+    expect((await c.app.inject({ method: 'GET', url: '/internal/likes?userId=1', headers: h, remoteAddress: '203.0.113.7' })).statusCode).toBe(404);
+    await c.app.close();
+  });
+});
