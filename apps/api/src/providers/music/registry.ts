@@ -51,7 +51,7 @@ export class CompositeProvider implements MusicProvider {
     return p;
   }
 
-  async search(q: string, opts: { type: 'all' | 'track' | 'artist' | 'album'; limit: number }): Promise<SearchResult> {
+  async search(q: string, opts: { type: 'all' | 'track' | 'artist' | 'album'; limit: number; offset?: number }): Promise<SearchResult> {
     const rs = await settle(this.providers.map((p) => p.search(q, opts)));
     return {
       tracks: interleave(rs.map((r) => r.tracks), opts.limit),
@@ -84,16 +84,18 @@ export class CompositeProvider implements MusicProvider {
     const all = (await settle(this.providers.map((p) => p.getGenres()))).flat();
     return [...new Map(all.map((g) => [g.id, g])).values()];
   }
-  async getGenreTracks(genre: string, limit: number): Promise<Track[]> {
-    return interleave(await settle(this.providers.map((p) => p.getGenreTracks(genre, limit))), limit);
+  // Paged lists: every source returns its own page; the merged page can hold up to limit x sources.
+  async getGenreTracks(genre: string, limit: number, offset = 0): Promise<Track[]> {
+    const lists = await settle(this.providers.map((p) => p.getGenreTracks(genre, limit, offset)));
+    return interleave(lists, limit * lists.length);
   }
-  async getLanguageTracks(lang: string, limit: number): Promise<Track[]> {
-    const ps = this.providers.filter((p) => p.getLanguageTracks).map((p) => p.getLanguageTracks!(lang, limit));
-    return interleave(await settle(ps), limit);
+  async getLanguageTracks(lang: string, limit: number, offset = 0): Promise<Track[]> {
+    const lists = await settle(this.providers.filter((p) => p.getLanguageTracks).map((p) => p.getLanguageTracks!(lang, limit, offset)));
+    return interleave(lists, limit * lists.length);
   }
-  async getTagTracks(tags: string[], limit: number): Promise<Track[]> {
-    const ps = this.providers.filter((p) => p.getTagTracks).map((p) => p.getTagTracks!(tags, limit));
-    return interleave(await settle(ps), limit);
+  async getTagTracks(tags: string[], limit: number, offset = 0): Promise<Track[]> {
+    const lists = await settle(this.providers.filter((p) => p.getTagTracks).map((p) => p.getTagTracks!(tags, limit, offset)));
+    return interleave(lists, limit * lists.length);
   }
   async getEditorial(): Promise<Album | null> {
     for (const p of this.providers) {

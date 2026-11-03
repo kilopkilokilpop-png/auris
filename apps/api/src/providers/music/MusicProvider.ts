@@ -67,7 +67,7 @@ export interface MusicProvider {
   /** True when `id` belongs to this adapter. */
   owns(id: string): boolean;
 
-  search(query: string, opts: { type: 'all' | 'track' | 'artist' | 'album'; limit: number }): Promise<SearchResult>;
+  search(query: string, opts: { type: 'all' | 'track' | 'artist' | 'album'; limit: number; offset?: number }): Promise<SearchResult>;
   getTrack(id: string): Promise<Track | null>;
   getAlbum(id: string): Promise<Album | null>;
   getArtist(id: string): Promise<Artist | null>;
@@ -76,11 +76,11 @@ export interface MusicProvider {
   getChart(limit: number): Promise<Track[]>;
   getChartArtists(limit: number): Promise<Artist[]>;
   getGenres(): Promise<Genre[]>;
-  getGenreTracks(genre: string, limit: number): Promise<Track[]>;
+  getGenreTracks(genre: string, limit: number, offset?: number): Promise<Track[]>;
   /** Tracks matching free tags (moods), if the source supports tags. */
-  getTagTracks?(tags: string[], limit: number): Promise<Track[]>;
+  getTagTracks?(tags: string[], limit: number, offset?: number): Promise<Track[]>;
   /** Tracks sung in a language (ISO 639-1, e.g. "ru"), if the source knows lyrics language. */
-  getLanguageTracks?(lang: string, limit: number): Promise<Track[]>;
+  getLanguageTracks?(lang: string, limit: number, offset?: number): Promise<Track[]>;
   /** "Выбор редакции" */
   getEditorial(): Promise<Album | null>;
 

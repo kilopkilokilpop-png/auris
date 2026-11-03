@@ -97,7 +97,8 @@ export const api = {
   joinPlaylist: (token: string) => request<{ id: string; title: string }>('POST', '/api/playlists/join', { token }),
   deletePlaylist: (pid: string) => request<{ ok: true; deleted: boolean }>('DELETE', `/api/playlists/${pid}`),
   collections: () => request<{ collections: Collection[] }>('GET', '/api/collections'),
-  collection: (id: string) => request<{ id: string; title: string; subtitle: string; tracks: Track[] }>('GET', `/api/collections/${encodeURIComponent(id)}`),
+  collection: (id: string, page = 0) =>
+    request<{ id: string; title: string; subtitle: string; tracks: Track[]; page: number; hasMore: boolean }>('GET', `/api/collections/${encodeURIComponent(id)}?page=${page}`),
 
   waveNext: (body: { mood: Mood; mode: WaveMode; exclude: string[]; recentArtists: string[]; count: number }) =>
     request<{ items: WaveItem[] }>('POST', '/api/wave/next', body),

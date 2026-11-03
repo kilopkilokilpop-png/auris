@@ -8,6 +8,7 @@ import { AppError } from '../lib/errors.js';
 
 const IdParam = z.object({ id: TrackIdSchema });
 const TIERS: QualityTier[] = ['standard', 'hifi', 'hires'];
+const PAGE = 30;
 
 export function capabilities(s: Services): CatalogCapabilities {
   const infos = s.music.providers.map((p) => p.info);
@@ -29,6 +30,7 @@ export const COLLECTIONS: (Collection & { kind: 'mood' | 'genre' | 'lang' | 'que
   // Russian youth music: searches in both sources, keeps Cyrillic titles/artists only.
   { id: 'ru-rap', kind: 'query', key: 'рэп|трэп|фонк|русский рэп|хип-хоп|drill', title: 'Русский рэп и трэп', subtitle: 'Новые артисты' },
   { id: 'lang-ru', kind: 'lang', key: 'ru', title: 'Русское', subtitle: 'Песни на русском' },
+  { id: 'lang-en', kind: 'lang', key: 'en', title: 'Английское', subtitle: 'Песни на английском' },
   { id: 'mood-energetic', kind: 'mood', key: 'energetic', title: 'Бодрое утро', subtitle: 'Энергия с первых нот' },
   { id: 'mood-calm', kind: 'mood', key: 'calm', title: 'Спокойствие', subtitle: 'Тихо, мягко, без спешки' },
   { id: 'mood-work', kind: 'mood', key: 'work', title: 'Фокус', subtitle: 'Для работы и учёбы' },
@@ -51,8 +53,8 @@ export function registerCatalogRoutes(app: FastifyInstance, s: Services) {
   app.get('/api/collections', async () => ({
     collections: COLLECTIONS.filter((c) => c.kind !== 'lang' || hasLang()).map(({ id, title, subtitle }) => ({ id, title, subtitle })),
   }));
-  const cyrillicSearch = async (queries: string[]) => {
-    const lists = await Promise.all(queries.map((q) => s.music.search(q, { type: 'track', limit: 30 }).then((r) => r.tracks).catch(() => [] as Track[])));
+  const cyrillicSearch = async (queries: string[], offset: number) => {
+    const lists = await Promise.all(queries.map((q) => s.music.search(q, { type: 'track', limit: 30, offset }).then((r) => r.tracks).catch(() => [] as Track[])));
     const seen = new Set<string>();
     return lists
       .flat()
@@ -61,19 +63,22 @@ export function registerCatalogRoutes(app: FastifyInstance, s: Services) {
   };
   app.get('/api/collections/:cid', async (req) => {
     const { cid } = z.object({ cid: z.string().max(40) }).parse(req.params);
+    const { page } = z.object({ page: z.coerce.number().int().min(0).max(300).default(0) }).parse(req.query);
     const c = COLLECTIONS.find((x) => x.id === cid);
     if (!c) throw new AppError('NOT_FOUND', 'Подборка не найдена', 404);
+    // Paged: each page asks every source for its next PAGE tracks; the client scrolls on while hasMore.
+    const offset = page * PAGE;
     const raw =
       c.kind === 'mood'
-        ? await s.music.getTagTracks(MOOD_KEYWORDS[c.key as keyof typeof MOOD_KEYWORDS].slice(0, 3), 30).catch(() => [])
+        ? await s.music.getTagTracks(MOOD_KEYWORDS[c.key as keyof typeof MOOD_KEYWORDS].slice(0, 3), PAGE, offset).catch(() => [])
         : c.kind === 'lang'
-          ? await s.music.getLanguageTracks(c.key, 40).catch(() => [])
+          ? await s.music.getLanguageTracks(c.key, PAGE, offset).catch(() => [])
           : c.kind === 'query'
-            ? await cyrillicSearch(c.key.split('|'))
-            : await s.music.getGenreTracks(c.key, 30).catch(() => []);
-    const tracks = playableFirst(raw).slice(0, 30);
+            ? await cyrillicSearch(c.key.split('|'), offset)
+            : await s.music.getGenreTracks(c.key, PAGE, offset).catch(() => []);
+    const tracks = playableFirst(raw);
     void s.store.saveSnapshots(tracks).catch(() => {});
-    return { id: c.id, title: c.title, subtitle: c.subtitle, tracks };
+    return { id: c.id, title: c.title, subtitle: c.subtitle, tracks, page, hasMore: raw.length > 0 };
   });
 
   app.get('/api/catalog/capabilities', async () => capabilities(s));

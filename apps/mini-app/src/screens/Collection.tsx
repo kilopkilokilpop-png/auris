@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { plural, type Track } from '@auris/shared';
 import { Cover } from '../components/Cover';
 import { IconHeart, IconMore, IconPlay, IconPlus } from '../components/Icons';
@@ -182,11 +183,49 @@ export function PlaylistScreen({ id, title }: { id: string; title: string }) {
 /** Curated collection (mood / genre). */
 export function CollectionScreen({ id, title }: { id: string; title: string }) {
   const q = useQuery(`col:${id}`, () => api.collection(id));
+  // Endless list: further pages are appended as the user scrolls to the bottom.
+  const [more, setMore] = useState<Track[]>([]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const sentinel = useRef<HTMLDivElement>(null);
+  const tracks = useMemo(() => {
+    const seen = new Set<string>();
+    return [...(q.data?.tracks ?? []), ...more].filter((t) => !seen.has(t.id) && Boolean(seen.add(t.id)));
+  }, [q.data, more]);
+  const canMore = Boolean(q.data) && (q.data?.hasMore ?? false) && hasMore;
+  const loadMore = useCallback(async () => {
+    if (busy || !canMore) return;
+    setBusy(true);
+    try {
+      const r = await api.collection(id, page + 1);
+      setPage(r.page);
+      setMore((m) => [...m, ...r.tracks]);
+      setHasMore(r.hasMore);
+    } catch {
+      setHasMore(false);
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, canMore, id, page]);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !canMore) return;
+    const io = new IntersectionObserver((e) => e[0]?.isIntersecting && void loadMore(), { rootMargin: '600px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMore, canMore]);
+  const ctx = q.data?.title ?? title;
   return (
     <main className="screen overlay" aria-label="Подборка">
-      <Header title={q.data?.title ?? title} sub={q.data?.subtitle ?? 'Подборка AURIS'} cover={q.data?.tracks[0]?.coverUrl} tracks={q.data?.tracks ?? []} context={q.data?.title ?? title} />
+      <Header title={ctx} sub={q.data ? `${q.data.subtitle} · ${tracks.length}${canMore ? '+' : ''} ${plural(tracks.length, ['трек', 'трека', 'треков'])}` : 'Подборка AURIS'} cover={tracks[0]?.coverUrl} tracks={tracks} context={ctx} />
       <div style={{ marginTop: 16 }}>
-        <Body loading={q.loading} error={q.error} reload={q.reload} tracks={q.data?.tracks} context={q.data?.title ?? title} />
+        <Body loading={q.loading} error={q.error} reload={q.reload} tracks={q.data ? tracks : undefined} context={ctx} />
+        {canMore ? (
+          <div ref={sentinel} style={{ marginTop: 8 }}>
+            {busy ? <SkeletonRows n={3} /> : <button type="button" className="btn ghost" style={{ width: '100%' }} onClick={() => void loadMore()}>Показать ещё</button>}
+          </div>
+        ) : null}
       </div>
     </main>
   );

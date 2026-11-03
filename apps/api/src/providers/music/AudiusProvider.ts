@@ -154,10 +154,10 @@ export class AudiusProvider implements MusicProvider {
     };
   }
 
-  async search(query: string, opts: { type: 'all' | 'track' | 'artist' | 'album'; limit: number }): Promise<SearchResult> {
+  async search(query: string, opts: { type: 'all' | 'track' | 'artist' | 'album'; limit: number; offset?: number }): Promise<SearchResult> {
     const want = (k: string) => opts.type === 'all' || opts.type === k;
     const [tracks, users, lists] = await Promise.all([
-      want('track') ? this.get<AuTrack[]>('/tracks/search', { query, limit: Math.min(50, opts.limit * 2) }).catch(() => []) : [],
+      want('track') ? this.get<AuTrack[]>('/tracks/search', { query, limit: Math.min(50, opts.limit * 2), offset: (opts.offset ?? 0) * 2 }).catch(() => []) : [],
       want('artist') ? this.get<AuUser[]>('/users/search', { query, limit: Math.min(10, opts.limit) }).catch(() => []) : [],
       want('album') ? this.get<AuPlaylist[]>('/playlists/search', { query, limit: Math.min(10, opts.limit) }).catch(() => []) : [],
     ]);
@@ -203,23 +203,25 @@ export class AudiusProvider implements MusicProvider {
   async getGenres(): Promise<Genre[]> {
     return Object.keys(GENRE_TO_AUDIUS).map((g) => ({ id: g, name: GENRE_NAMES_RU[g] ?? GENRE_TO_AUDIUS[g]! }));
   }
-  async getGenreTracks(genre: string, limit: number) {
+  async getGenreTracks(genre: string, limit: number, offset = 0) {
     const g = GENRE_TO_AUDIUS[genre];
     if (!g) return [];
-    return this.list(await this.get<AuTrack[]>('/tracks/trending', { genre: g, time: 'month', limit: Math.min(100, limit * 2) }), limit);
+    return this.list(await this.get<AuTrack[]>('/tracks/trending', { genre: g, time: 'month', limit: Math.min(100, limit * 2), offset: offset * 2 }), limit);
   }
-  async getTagTracks(tags: string[], limit: number) {
-    const t = await this.get<AuTrack[]>('/tracks/trending', { time: 'month', limit: 100 });
+  async getTagTracks(tags: string[], limit: number, offset = 0) {
+    const t = await this.get<AuTrack[]>('/tracks/trending', { time: 'month', limit: 100, offset: offset * 3 });
     return this.list(t, 100).filter((x) => x.tags.some((tag) => tags.includes(tag))).slice(0, limit);
   }
   /**
    * Audius has no lyrics-language field. For Cyrillic languages we search genre words in that
    * language and keep tracks whose title or artist is written in Cyrillic.
    */
-  async getLanguageTracks(lang: string, limit: number) {
+  async getLanguageTracks(lang: string, limit: number, offset = 0) {
     const queries = CYRILLIC_QUERIES[lang];
     if (!queries) return [];
-    const lists = await Promise.all(queries.map((q) => this.get<AuTrack[]>('/tracks/search', { query: q, limit: 40 }).catch(() => [] as AuTrack[])));
+    // Each page walks every query word one page deeper.
+    const page = Math.floor(offset / Math.max(1, limit));
+    const lists = await Promise.all(queries.map((q) => this.get<AuTrack[]>('/tracks/search', { query: q, limit: 40, offset: page * 40 }).catch(() => [] as AuTrack[])));
     const seen = new Set<string>();
     const out: AuTrack[] = [];
     for (const t of lists.flat().sort((a, b) => (b.play_count ?? 0) - (a.play_count ?? 0))) {

@@ -88,7 +88,7 @@ export class JamendoProvider implements MusicProvider {
     private readonly clientId: string,
     private readonly cacheFileId: boolean,
     private readonly fetcher: typeof fetchJson = fetchJson,
-    private readonly retries = 3,
+    private readonly retries = 5,
   ) {}
 
   owns(id: string) {
@@ -173,10 +173,10 @@ export class JamendoProvider implements MusicProvider {
     };
   }
 
-  async search(query: string, opts: { type: 'all' | 'track' | 'artist' | 'album'; limit: number }): Promise<SearchResult> {
+  async search(query: string, opts: { type: 'all' | 'track' | 'artist' | 'album'; limit: number; offset?: number }): Promise<SearchResult> {
     const want = (k: string) => opts.type === 'all' || opts.type === k;
     const [tracks, artists, albums] = await Promise.all([
-      want('track') ? this.get<JmTrack>('/tracks', this.trackParams({ search: query, limit: opts.limit, order: 'relevance' })) : [],
+      want('track') ? this.get<JmTrack>('/tracks', this.trackParams({ search: query, limit: opts.limit, offset: opts.offset ?? 0, order: 'relevance' })) : [],
       want('artist') ? this.get<JmArtist>('/artists', { namesearch: query, limit: Math.min(10, opts.limit) }) : [],
       want('album') ? this.get<JmAlbum>('/albums', { namesearch: query, limit: Math.min(10, opts.limit), imagesize: 600 }) : [],
     ]);
@@ -232,17 +232,20 @@ export class JamendoProvider implements MusicProvider {
   async getGenres(): Promise<Genre[]> {
     return GENRES.map((g) => ({ id: g, name: GENRE_NAMES_RU[g] ?? g }));
   }
-  async getGenreTracks(genre: string, limit: number) {
+  async getGenreTracks(genre: string, limit: number, offset = 0) {
     // Weekly/monthly rankings combined with a tag filter come back empty: use the all-time ranking.
-    return this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ tags: genre, order: 'popularity_total', limit })));
+    return this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ tags: genre, order: 'popularity_total', limit, offset })));
   }
-  async getTagTracks(tags: string[], limit: number) {
-    return this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ fuzzytags: tags.join('+'), order: 'popularity_total', limit })));
+  async getTagTracks(tags: string[], limit: number, offset = 0) {
+    return this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ fuzzytags: tags.join('+'), order: 'popularity_total', limit, offset })));
   }
-  /** Jamendo knows the lyrics language (musicinfo.lang): this week's popular first, all-time as fallback. */
-  async getLanguageTracks(lang: string, limit: number) {
-    const week = await this.get<JmTrack>('/tracks', this.trackParams({ lang, order: 'popularity_week', limit }));
-    return this.ranked(week.length >= Math.min(10, limit) ? week : await this.get<JmTrack>('/tracks', this.trackParams({ lang, order: 'popularity_total', limit })));
+  /** Jamendo knows the lyrics language (musicinfo.lang): first page = this week's popular, then the all-time ranking. */
+  async getLanguageTracks(lang: string, limit: number, offset = 0) {
+    if (offset === 0) {
+      const week = await this.get<JmTrack>('/tracks', this.trackParams({ lang, order: 'popularity_week', limit }));
+      if (week.length >= Math.min(10, limit)) return this.ranked(week);
+    }
+    return this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ lang, order: 'popularity_total', limit, offset })));
   }
   /**
    * "Выбор редакции" = Jamendo's own editorial picks (`featured=1`), exposed as a virtual album
