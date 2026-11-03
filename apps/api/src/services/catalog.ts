@@ -17,7 +17,13 @@ export class Catalog {
         return fresh ?? snaps.get(id) ?? null;
       }),
     );
-    const tracks = out.filter((t): t is Track => !!t);
+    const tracks = out
+      .filter((t): t is Track => !!t)
+      .map((t) =>
+        this.music.owns(t.id)
+          ? t
+          : { ...t, playback: { kind: 'none' as const, playableSec: 0, qualities: [], note: 'Источник этого трека больше не подключён' }, downloadable: false, downloadNote: 'Источник больше не подключён' },
+      );
     void this.store.saveSnapshots(tracks).catch(() => {});
     return tracks;
   }

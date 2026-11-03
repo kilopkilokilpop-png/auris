@@ -12,6 +12,7 @@ import { stripPrefix, type DownloadDecision, type MusicProvider, type ProviderIn
  */
 const P = 'jamendo';
 const BASE = 'https://api.jamendo.com/v3.0';
+const FEATURED = 'featured';
 const GENRES = ['pop', 'rock', 'electronic', 'hiphop', 'jazz', 'indie', 'classical', 'ambient', 'chillout', 'folk', 'metal', 'lounge', 'world', 'soundtrack', 'reggae', 'blues'];
 
 export interface JmTrack {
@@ -30,7 +31,8 @@ export interface JmTrack {
   license_ccurl?: string;
   shareurl?: string;
   musicinfo?: { tags?: { genres?: string[]; vartags?: string[] } };
-  stats?: { rate_listened_total?: number; popularity_total?: number };
+  position?: number;
+  stats?: { rate_listened_total?: number; rate_downloads_total?: number; popularity_total?: number };
 }
 interface JmArtist { id: string; name: string; image?: string; shareurl?: string }
 interface JmAlbum { id: string; name: string; artist_id: string; artist_name: string; image?: string; releasedate?: string }
@@ -60,6 +62,14 @@ export function jamendoDownloadRule(t: Pick<JmTrack, 'audiodownload_allowed' | '
   return { ok: true };
 }
 
+/** Jamendo returns raw counters (no 0..1 score): log-scale listens + downloads into 0..1. */
+export function jamendoPopularity(stats?: JmTrack['stats']): number {
+  if (!stats) return 0;
+  if (stats.popularity_total) return Math.min(1, stats.popularity_total / 100);
+  const n = (stats.rate_listened_total ?? 0) + (stats.rate_downloads_total ?? 0) / 10;
+  return Math.min(1, Math.log10(1 + n) / 6);
+}
+
 export class JamendoProvider implements MusicProvider {
   readonly info: ProviderInfo = {
     id: 'jamendo',
@@ -78,26 +88,45 @@ export class JamendoProvider implements MusicProvider {
     private readonly clientId: string,
     private readonly cacheFileId: boolean,
     private readonly fetcher: typeof fetchJson = fetchJson,
+    private readonly retries = 3,
   ) {}
 
   owns(id: string) {
     return id.startsWith(P + ':');
   }
 
+  /**
+   * Jamendo intermittently answers a valid query with an empty result set (same request, different backend).
+   * Empty answers are retried and never cached, so a hiccup does not stick for the cache TTL.
+   */
   private async get<T>(path: string, params: Record<string, string | number>, cache = true): Promise<T[]> {
     const qs = new URLSearchParams({ client_id: this.clientId, format: 'json', ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])) });
     const url = `${BASE}${path}/?${qs}`;
-    const go = async () => {
+    if (cache) {
+      const hit = this.cache.get(url) as T[] | undefined;
+      if (hit) return hit;
+    }
+    let results: T[] = [];
+    for (let attempt = 0; attempt < this.retries; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 250 * attempt));
       await this.limiter.take();
       const r = await this.fetcher<JmResp<T>>(url);
       if (r.headers.status !== 'success') throw new UpstreamError(`Jamendo: ${r.headers.error_message ?? r.headers.code}`);
-      return r.results;
-    };
-    return (cache ? this.cache.wrap(url, go) : go()) as Promise<T[]>;
+      results = r.results;
+      if (results.length) break;
+    }
+    if (cache && results.length) this.cache.set(url, results);
+    return results;
   }
 
   private trackParams(extra: Record<string, string | number>) {
-    return { include: 'musicinfo+stats', audioformat: 'mp32', audiodlformat: 'mp32', imagesize: 600, ...extra };
+    // Only ONE include: combining "musicinfo stats" makes filtered queries (album_id, tags) return nothing.
+    return { include: 'musicinfo', audioformat: 'mp32', audiodlformat: 'mp32', imagesize: 600, ...extra };
+  }
+
+  /** Lists ordered by popularity: rank -> 0.5..1 (Jamendo gives no score with our include). */
+  private ranked(list: JmTrack[]): Track[] {
+    return list.map((t, i) => ({ ...this.toTrack(t), popularity: t.stats ? jamendoPopularity(t.stats) : Math.max(0.5, 1 - i / Math.max(1, list.length) / 2) }));
   }
 
   toTrack(t: JmTrack): Track {
@@ -119,7 +148,7 @@ export class JamendoProvider implements MusicProvider {
       coverUrl: t.album_image || t.image,
       genres: (t.musicinfo?.tags?.genres ?? []).map(canonicalGenre),
       tags: t.musicinfo?.tags?.vartags ?? [],
-      popularity: Math.min(1, (t.stats?.popularity_total ?? 0) / 100),
+      popularity: t.stats ? jamendoPopularity(t.stats) : 0.4,
       playback: t.audio
         ? { kind: 'full', playableSec: t.duration, qualities: [{ tier: 'standard', codec: 'mp3', lossless: false }] }
         : { kind: 'none', playableSec: 0, qualities: [], note: 'Jamendo не отдаёт поток для этого трека' },
@@ -164,9 +193,12 @@ export class JamendoProvider implements MusicProvider {
   }
   async getAlbum(id: string) {
     const aid = stripPrefix(id, P);
+    if (aid === FEATURED) return this.featured();
     const [a] = await this.get<JmAlbum>('/albums', { id: aid, imagesize: 600 });
     if (!a) return null;
-    const tracks = await this.get<JmTrack>('/tracks', this.trackParams({ album_id: aid, limit: 50, order: 'position' }));
+    // The API has no "order by position" for tracks: sort by the returned position.
+    const tracks = await this.get<JmTrack>('/tracks', this.trackParams({ album_id: aid, limit: 50 }));
+    tracks.sort((x, y) => (x.position ?? 0) - (y.position ?? 0));
     return this.toAlbum(a, tracks.map((t) => this.toTrack(t)));
   }
   async getArtist(id: string) {
@@ -174,7 +206,7 @@ export class JamendoProvider implements MusicProvider {
     return a ? this.toArtist(a) : null;
   }
   async getArtistTopTracks(id: string, limit: number) {
-    return (await this.get<JmTrack>('/tracks', this.trackParams({ artist_id: stripPrefix(id, P), limit, order: 'popularity_total' }))).map((t) => this.toTrack(t));
+    return this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ artist_id: stripPrefix(id, P), limit, order: 'popularity_total' })));
   }
   async getRelatedArtists(id: string, limit: number) {
     // Jamendo has no "related artists": use artists of tracks similar by the artist's main genre.
@@ -191,7 +223,8 @@ export class JamendoProvider implements MusicProvider {
     return [...seen.values()].slice(0, limit);
   }
   async getChart(limit: number) {
-    return (await this.get<JmTrack>('/tracks', this.trackParams({ order: 'popularity_week', limit }))).map((t) => this.toTrack(t));
+    const week = await this.get<JmTrack>('/tracks', this.trackParams({ order: 'popularity_week', limit }));
+    return this.ranked(week.length ? week : await this.get<JmTrack>('/tracks', this.trackParams({ order: 'popularity_total', limit })));
   }
   async getChartArtists(limit: number) {
     return (await this.get<JmArtist>('/artists', { order: 'popularity_week', limit })).map((a) => this.toArtist(a));
@@ -200,14 +233,32 @@ export class JamendoProvider implements MusicProvider {
     return GENRES.map((g) => ({ id: g, name: GENRE_NAMES_RU[g] ?? g }));
   }
   async getGenreTracks(genre: string, limit: number) {
-    return (await this.get<JmTrack>('/tracks', this.trackParams({ tags: genre, order: 'popularity_month', limit }))).map((t) => this.toTrack(t));
+    // Weekly/monthly rankings combined with a tag filter come back empty: use the all-time ranking.
+    return this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ tags: genre, order: 'popularity_total', limit })));
   }
   async getTagTracks(tags: string[], limit: number) {
-    return (await this.get<JmTrack>('/tracks', this.trackParams({ fuzzytags: tags.join('+'), order: 'popularity_month', limit }))).map((t) => this.toTrack(t));
+    return this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ fuzzytags: tags.join('+'), order: 'popularity_total', limit })));
   }
+  /**
+   * "Выбор редакции" = Jamendo's own editorial picks (`featured=1`), exposed as a virtual album
+   * `jamendo:featured`. Jamendo's top "albums" are almost all singles, so they make a poor showcase.
+   */
+  private async featured(): Promise<Album | null> {
+    const tracks = this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ featured: 1, order: 'popularity_week', limit: 20 })));
+    if (!tracks.length) return null;
+    return {
+      id: `${P}:${FEATURED}`,
+      provider: 'jamendo',
+      title: 'Выбор редакции Jamendo',
+      artist: { id: `${P}:${FEATURED}`, name: 'Разные артисты' },
+      coverUrl: tracks[0]!.coverUrl,
+      trackCount: tracks.length,
+      tracks,
+    };
+  }
+
   async getEditorial() {
-    const [a] = await this.get<JmAlbum>('/albums', { order: 'popularity_week', limit: 1, imagesize: 600 });
-    return a ? this.getAlbum(`${P}:${a.id}`) : null;
+    return this.featured();
   }
 
   async getStream(id: string, _tier: QualityTier): Promise<StreamSource | null> {

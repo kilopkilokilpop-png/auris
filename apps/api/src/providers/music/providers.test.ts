@@ -43,6 +43,32 @@ describe('Jamendo licence rules', () => {
   });
 });
 
+describe('Jamendo flaky empty answers', () => {
+  it('retries an empty result and does not cache it', async () => {
+    let calls = 0;
+    const p = new JamendoProvider('id', false, (async () => {
+      calls++;
+      return { headers: { status: 'success', code: 0 }, results: calls === 1 ? [] : [jm({})] };
+    }) as never, 3);
+    expect((await p.getChart(5)).length).toBe(1);
+    expect(calls).toBe(2);
+    await p.getChart(5);
+    expect(calls).toBe(2); // non-empty answer cached
+  });
+});
+
+describe('Jamendo popularity', () => {
+  it('maps raw counters to 0..1 on a log scale', async () => {
+    const { jamendoPopularity } = await import('./JamendoProvider.js');
+    expect(jamendoPopularity(undefined)).toBe(0);
+    expect(jamendoPopularity({ rate_listened_total: 0 })).toBe(0);
+    const small = jamendoPopularity({ rate_listened_total: 100 });
+    const big = jamendoPopularity({ rate_listened_total: 1738, rate_downloads_total: 9_913_849 });
+    expect(big).toBeGreaterThan(small);
+    expect(big).toBeLessThanOrEqual(1);
+  });
+});
+
 describe('Deezer', () => {
   it('is preview-only and never downloadable', async () => {
     const dz = fakeDeezer();

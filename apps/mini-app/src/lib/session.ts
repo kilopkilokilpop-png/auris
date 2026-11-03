@@ -21,6 +21,14 @@ export async function loadSession() {
     api.publicConfig().catch(() => ({ botUsername: null })),
   ]);
   tg.setBotUsername(config.botUsername);
+  // A saved tier the current sources cannot deliver (e.g. Hi-Res after a provider change) falls back honestly.
+  const tiers = capabilities?.qualities ?? [];
+  const current = tiers.find((q) => q.tier === profile.settings.quality);
+  if (current && !current.available) {
+    const best = [...tiers].reverse().find((q) => q.available)?.tier ?? 'standard';
+    profile.settings = { ...profile.settings, quality: best };
+    void api.settings({ quality: best }).catch(() => {});
+  }
   session.set({ profile, liked: new Set(likes.ids), capabilities });
   player.setQuality(profile.settings.quality);
   return profile;
