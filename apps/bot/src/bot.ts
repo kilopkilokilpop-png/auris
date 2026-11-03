@@ -86,6 +86,16 @@ export function createBot(api: AurisApi, cfg: BotConfig): Bot {
   bot.command('start', async (ctx) => {
     await touch(ctx, true);
     const payload = ctx.match?.trim();
+    // Shared playlist invite: t.me/<bot>?start=pl_<token>
+    if (payload?.startsWith('pl_')) {
+      const token = payload.slice(3);
+      const inv = /^[A-Za-z0-9_-]{8,64}$/.test(token) ? await api.playlistInvite(token).catch(() => null) : null;
+      if (!inv) return ctx.reply('Это приглашение больше не действует. Попросите прислать новую ссылку.');
+      return ctx.reply(`🎧 <b>${esc(inv.owner)}</b> приглашает вас в плейлист <b>«${esc(inv.title)}»</b> · ${inv.trackCount} тр.\n\nВместе вы сможете добавлять туда треки.`, {
+        parse_mode: 'HTML',
+        reply_markup: openKeyboard(cfg.miniAppUrl, 'Открыть плейлист', { join: token }),
+      });
+    }
     const text =
       payload === 'download'
         ? 'Готово — теперь я могу присылать вам файлы. Вернитесь в AURIS и нажмите «Скачать в Telegram» ещё раз.'

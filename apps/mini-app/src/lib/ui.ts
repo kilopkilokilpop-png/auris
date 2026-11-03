@@ -13,14 +13,28 @@ export type SheetState =
   | { kind: 'playlist-pick'; track: Track }
   | null;
 
-export const ui = new Store<{ toast: Toast | null; sheet: SheetState }>({ toast: null, sheet: null });
+export const ui = new Store<{ toast: Toast | null; sheet: SheetState; sheetClosing: boolean; toastClosing: boolean }>({ toast: null, sheet: null, sheetClosing: false, toastClosing: false });
+const reduced = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 let n = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 export function toast(text: string, action?: Toast['action'], ms = 3200) {
   clearTimeout(timer);
-  ui.set({ toast: { id: ++n, text, action } });
-  timer = setTimeout(() => ui.set({ toast: null }), action ? ms + 2500 : ms);
+  ui.set({ toast: { id: ++n, text, action }, toastClosing: false });
+  timer = setTimeout(() => {
+    ui.set({ toastClosing: true });
+    timer = setTimeout(() => ui.set({ toast: null, toastClosing: false }), reduced() ? 0 : 180);
+  }, action ? ms + 2500 : ms);
 }
-export const openSheet = (s: SheetState) => ui.set({ sheet: s });
-export const closeSheet = () => ui.set({ sheet: null });
+let sheetTimer: ReturnType<typeof setTimeout> | undefined;
+export const openSheet = (s: SheetState) => {
+  clearTimeout(sheetTimer);
+  ui.set({ sheet: s, sheetClosing: false });
+};
+/** Plays the slide-down before unmounting. */
+export const closeSheet = () => {
+  if (!ui.get().sheet || ui.get().sheetClosing) return;
+  ui.set({ sheetClosing: true });
+  clearTimeout(sheetTimer);
+  sheetTimer = setTimeout(() => ui.set({ sheet: null, sheetClosing: false }), reduced() ? 0 : 220);
+};

@@ -151,8 +151,28 @@ export const PlaylistSchema = z.object({
   trackCount: z.number().int(),
   coverUrl: z.string().optional(),
   createdAt: z.string(),
+  /** Caller's role: owner can delete; editors add tracks and invite. */
+  role: z.enum(['owner', 'editor']),
+  memberCount: z.number().int(),
 });
 export type Playlist = z.infer<typeof PlaylistSchema>;
+
+export const PlaylistMemberSchema = z.object({ id: z.number().int(), name: z.string(), role: z.enum(['owner', 'editor']) });
+export type PlaylistMember = z.infer<typeof PlaylistMemberSchema>;
+
+export const PlaylistDetailSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  role: z.enum(['owner', 'editor']),
+  members: z.array(PlaylistMemberSchema),
+  tracks: z.array(TrackSchema),
+  /** trackId -> user id who added it */
+  addedBy: z.record(z.string(), z.number().int().nullable()),
+});
+export type PlaylistDetail = z.infer<typeof PlaylistDetailSchema>;
+
+export const CollectionSchema = z.object({ id: z.string(), title: z.string(), subtitle: z.string() });
+export type Collection = z.infer<typeof CollectionSchema>;
 
 export const RecognitionSchema = z.object({
   id: z.string(),

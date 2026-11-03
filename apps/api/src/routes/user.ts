@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { OnboardingSubmitSchema, PlaylistAddSchema, PlaylistCreateSchema, PostEventSchema, SettingsPatchSchema, TrackIdSchema, type Playlist } from '@auris/shared';
+import crypto from 'node:crypto';
+import { OnboardingSubmitSchema, PlaylistAddSchema, PlaylistCreateSchema, PlaylistJoinSchema, PostEventSchema, SettingsPatchSchema, TrackIdSchema, type Playlist, type PlaylistDetail } from '@auris/shared';
 import { userId, type Services } from '../app.js';
 import { AppError } from '../lib/errors.js';
 
@@ -101,11 +102,20 @@ export function registerUserRoutes(app: FastifyInstance, s: Services) {
     return { ok: true };
   });
 
-  // ---------- playlists ----------
-  const toPlaylist = async (r: { id: number; title: string; created_at: Date | string; n: number; first: string | null }): Promise<Playlist> => {
+  // ---------- playlists (shared) ----------
+  const toPlaylist = async (r: { id: number; title: string; created_at: Date | string; n: number; first: string | null; role: 'owner' | 'editor'; members: number }): Promise<Playlist> => {
     const cover = r.first ? (await s.store.snapshots([r.first])).get(r.first)?.coverUrl : undefined;
-    return { id: String(r.id), title: r.title, trackCount: r.n, coverUrl: cover, createdAt: new Date(r.created_at).toISOString() };
+    return { id: String(r.id), title: r.title, trackCount: r.n, coverUrl: cover, createdAt: new Date(r.created_at).toISOString(), role: r.role, memberCount: r.members };
   };
+  const access = async (uid: number, pid: number) => {
+    const pl = await s.store.playlistAccess(uid, pid);
+    // Non-members get the same answer as for a missing playlist.
+    if (!pl) throw new AppError('NOT_FOUND', 'Плейлист не найден', 404);
+    return pl;
+  };
+  const inviteLink = (token: string) =>
+    s.env.BOT_USERNAME ? `https://t.me/${s.env.BOT_USERNAME}?start=pl_${token}` : `${s.env.MINI_APP_URL.replace(/\/$/, '')}/?join=${token}`;
+
   app.get('/api/playlists', async (req) => ({ playlists: await Promise.all((await s.store.playlists(userId(req))).map(toPlaylist)) }));
   app.post('/api/playlists', async (req) => {
     const { title } = PlaylistCreateSchema.parse(req.body);
@@ -113,22 +123,75 @@ export function registerUserRoutes(app: FastifyInstance, s: Services) {
     return { id: String(id) };
   });
   const PlParam = z.object({ pid: z.coerce.number().int().positive() });
-  app.get('/api/playlists/:pid', async (req) => {
+
+  app.get('/api/playlists/invite/:token', async (req) => {
+    userId(req);
+    const { token } = PlaylistJoinSchema.parse(req.params);
+    const pl = await s.store.playlistByInvite(token);
+    if (!pl) throw new AppError('NOT_FOUND', 'Приглашение недействительно', 404);
+    return { title: pl.title, owner: pl.owner, trackCount: pl.n, memberCount: pl.members };
+  });
+  app.post('/api/playlists/join', async (req) => {
+    const uid = userId(req);
+    const { token } = PlaylistJoinSchema.parse(req.body);
+    const pl = await s.store.playlistByInvite(token);
+    if (!pl) throw new AppError('NOT_FOUND', 'Приглашение недействительно', 404);
+    await s.store.joinPlaylist(pl.id, uid);
+    return { id: String(pl.id), title: pl.title };
+  });
+
+  app.get('/api/playlists/:pid', async (req): Promise<PlaylistDetail> => {
+    const uid = userId(req);
     const { pid } = PlParam.parse(req.params);
-    const pl = await s.store.playlistOwned(userId(req), pid);
-    if (!pl) throw new AppError('NOT_FOUND', 'Плейлист не найден', 404);
-    return { id: String(pl.id), title: pl.title, tracks: await s.catalog.hydrate(await s.store.playlistTrackIds(pid)) };
+    const pl = await access(uid, pid);
+    const rows = await s.store.playlistTracks(pid);
+    return {
+      id: String(pl.id),
+      title: pl.title,
+      role: pl.role,
+      members: await s.store.playlistMembers(pid),
+      tracks: await s.catalog.hydrate(rows.map((r) => r.track_id)),
+      addedBy: Object.fromEntries(rows.map((r) => [r.track_id, r.added_by])),
+    };
   });
   app.post('/api/playlists/:pid/tracks', async (req) => {
     const uid = userId(req);
     const { pid } = PlParam.parse(req.params);
     const { trackId } = PlaylistAddSchema.parse(req.body);
-    if (!(await s.store.playlistOwned(uid, pid))) throw new AppError('NOT_FOUND', 'Плейлист не найден', 404);
+    await access(uid, pid);
     const [track] = await s.catalog.hydrate([trackId]);
     if (!track) throw new AppError('NOT_FOUND', 'Трек не найден', 404);
-    await s.store.addToPlaylist(pid, trackId);
+    await s.store.addToPlaylist(pid, trackId, uid);
     await s.store.addEvent(uid, { trackId, kind: 'playlist_add', artistId: track.artist.id, genres: track.genres });
     s.wave.invalidate(uid);
     return { ok: true };
+  });
+  app.delete('/api/playlists/:pid/tracks/:id', async (req) => {
+    const uid = userId(req);
+    const { pid } = PlParam.parse(req.params);
+    const { id } = IdParam.parse(req.params);
+    const pl = await access(uid, pid);
+    const row = (await s.store.playlistTracks(pid)).find((r) => r.track_id === id);
+    if (!row) throw new AppError('NOT_FOUND', 'Трека нет в плейлисте', 404);
+    // Owner removes anything; members remove what they added.
+    if (pl.role !== 'owner' && row.added_by !== uid) throw new AppError('UNAUTHORIZED', 'Убрать этот трек может только тот, кто его добавил, или владелец', 403);
+    await s.store.removeFromPlaylist(pid, id);
+    return { ok: true };
+  });
+  app.post('/api/playlists/:pid/invite', async (req) => {
+    const uid = userId(req);
+    const { pid } = PlParam.parse(req.params);
+    await access(uid, pid);
+    const token = await s.store.playlistInviteToken(pid, crypto.randomBytes(12).toString('base64url'));
+    return { token, link: inviteLink(token) };
+  });
+  /** Owner deletes the playlist for everyone; a member leaves it. */
+  app.delete('/api/playlists/:pid', async (req) => {
+    const uid = userId(req);
+    const { pid } = PlParam.parse(req.params);
+    const pl = await access(uid, pid);
+    if (pl.role === 'owner') await s.store.deletePlaylist(pid);
+    else await s.store.leavePlaylist(pid, uid);
+    return { ok: true, deleted: pl.role === 'owner' };
   });
 }

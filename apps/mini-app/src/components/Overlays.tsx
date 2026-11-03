@@ -12,9 +12,10 @@ import { IconAlbum, IconDownload, IconHeart, IconInfo, IconPlay, IconPlus, IconT
 
 export function ToastHost() {
   const t = useStore(ui, (s) => s.toast);
+  const closing = useStore(ui, (s) => s.toastClosing);
   if (!t) return null;
   return (
-    <div className="toast" role="status" aria-live="polite" key={t.id}>
+    <div className={`toast ${closing ? 'closing' : ''}`} role="status" aria-live="polite" key={t.id}>
       <span>{t.text}</span>
       {t.action ? (
         <button type="button" className="btn" onClick={t.action.run}>
@@ -27,6 +28,7 @@ export function ToastHost() {
 
 export function SheetHost() {
   const sheet = useStore(ui, (s) => s.sheet);
+  const closing = useStore(ui, (s) => s.sheetClosing);
   useEffect(() => {
     if (!sheet) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeSheet();
@@ -36,8 +38,8 @@ export function SheetHost() {
   if (!sheet) return null;
   return (
     <>
-      <div className="scrim" onClick={closeSheet} aria-hidden="true" />
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={sheet.kind === 'info' ? sheet.title : 'Действия с треком'}>
+      <div className={`scrim ${closing ? 'closing' : ''}`} onClick={closeSheet} aria-hidden="true" />
+      <div className={`sheet ${closing ? 'closing' : ''}`} role="dialog" aria-modal="true" aria-label={sheet.kind === 'info' ? sheet.title : 'Действия с треком'}>
         {sheet.kind === 'track' ? <TrackSheet track={sheet.track} /> : null}
         {sheet.kind === 'playlist-pick' ? <PlaylistPick track={sheet.track} /> : null}
         {sheet.kind === 'info' ? (

@@ -24,6 +24,37 @@ function albumBadge(a: Album): string | null {
   return null;
 }
 
+/** Monochrome tiles: same palette, different light angle per tile. */
+function tileBg(i: number) {
+  const light = [0x6a, 0x58, 0x7a, 0x4e, 0x64][i % 5]!.toString(16);
+  const angle = [150, 200, 120, 240, 170][i % 5];
+  return `radial-gradient(120% 80% at 20% 0%, rgb(255 255 255 / 0.18), transparent 60%), linear-gradient(${angle}deg, #${light}${light}${light} 0%, #232326 55%, #121214 100%)`;
+}
+
+function Collections() {
+  const q = useQuery('collections', () => api.collections());
+  if (q.error || (q.data && !q.data.collections.length)) return null;
+  return (
+    <section className="section" aria-labelledby="col-h">
+      <div className="section-head">
+        <h2 className="h2" id="col-h">
+          Подборки
+        </h2>
+      </div>
+      <div className="hscroll" style={{ paddingTop: 4, paddingBottom: 4 }}>
+        {q.loading && !q.data
+          ? Array.from({ length: 3 }, (_, i) => <span key={i} className="collection-tile skeleton" aria-hidden="true" />)
+          : q.data?.collections.map((c, i) => (
+              <button key={c.id} type="button" className="collection-tile" style={{ ['--tile-bg' as string]: tileBg(i) }} onClick={() => go.push({ name: 'collection', id: c.id, title: c.title })}>
+                <strong>{c.title}</strong>
+                <span>{c.subtitle}</span>
+              </button>
+            ))}
+      </div>
+    </section>
+  );
+}
+
 export function Home() {
   const profile = useStore(session, (s) => s.profile);
   const caps = useStore(session, (s) => s.capabilities);
@@ -95,7 +126,7 @@ export function Home() {
         <article className="editorial glass" aria-label={`Выбор редакции: ${editorial.title}`}>
           <button type="button" style={{ display: 'block', width: '100%' }} onClick={() => go.push({ name: 'album', id: editorial.id })} aria-label={`Открыть альбом ${editorial.title}`}>
             <div className="editorial-art">
-              <div className="editorial-disc">{editorial.coverUrl ? <img src={editorial.coverUrl} alt="" /> : null}</div>
+              <div className="editorial-disc">{editorial.coverUrl ? <img src={editorial.coverUrl} alt="" onLoad={(e) => e.currentTarget.classList.add('loaded')} /> : null}</div>
               {badge ? <span className="editorial-badge">{badge}</span> : null}
             </div>
           </button>
@@ -141,6 +172,7 @@ export function Home() {
         ) : null}
         {q.data?.recent.length ? <TrackList tracks={q.data.recent.slice(0, 6)} context="Недавно" trailing="badge" /> : null}
       </section>
+      <Collections />
       {caps?.providers.some((p) => p.previewsOnly) ? (
         <p className="notice">{caps.providers.find((p) => p.previewsOnly)?.notice}</p>
       ) : null}

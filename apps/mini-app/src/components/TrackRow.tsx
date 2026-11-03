@@ -6,11 +6,11 @@ import { player } from '../lib/player';
 import { openSheet } from '../lib/ui';
 import { toggleLike } from '../lib/session';
 import { Cover } from './Cover';
-import { IconHeart, IconMore } from './Icons';
+import { IconClose, IconHeart, IconMore } from './Icons';
 
 export type RowTrailing = 'badge' | 'heart' | 'more';
 
-export function TrackRow({ track, onPlay, trailing = 'more', sub }: { track: Track; onPlay: () => void; trailing?: RowTrailing; sub?: string }) {
+export function TrackRow({ track, onPlay, trailing = 'more', sub, onRemove }: { track: Track; onPlay: () => void; trailing?: RowTrailing; sub?: string; onRemove?: () => void }) {
   const tier = useStore(session, (s) => s.profile?.settings.quality ?? 'standard');
   const liked = useStore(session, (s) => s.liked.has(track.id));
   const current = useStore(player.store, (s) => s.queue[s.index]?.id === track.id);
@@ -47,11 +47,16 @@ export function TrackRow({ track, onPlay, trailing = 'more', sub }: { track: Tra
           </button>
         </>
       ) : null}
+      {onRemove ? (
+        <button type="button" className="icon-btn" aria-label={`Убрать из плейлиста: ${track.title}`} onClick={onRemove}>
+          <IconClose />
+        </button>
+      ) : null}
     </li>
   );
 }
 
-export function TrackList({ tracks, context, trailing, sub }: { tracks: Track[]; context: string; trailing?: RowTrailing; sub?: (t: Track) => string | undefined }) {
+export function TrackList({ tracks, context, trailing, sub, onRemove }: { tracks: Track[]; context: string; trailing?: RowTrailing; sub?: (t: Track) => string | undefined; onRemove?: (t: Track) => (() => void) | undefined }) {
   return (
     <ul className="list">
       {tracks.map((t, i) => (
@@ -60,6 +65,7 @@ export function TrackList({ tracks, context, trailing, sub }: { tracks: Track[];
           track={t}
           trailing={trailing}
           sub={sub?.(t)}
+          onRemove={onRemove?.(t)}
           onPlay={() => (t.playback.kind === 'none' ? openSheet({ kind: 'info', title: 'Нельзя послушать', body: t.playback.note ?? 'Источник не даёт воспроизвести этот трек.' }) : player.playList(tracks, i, { label: context, kind: 'list' }))}
         />
       ))}

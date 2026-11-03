@@ -83,9 +83,11 @@ export async function downloadToTelegram(track: Track) {
   }
   toast('Отправляем в чат с ботом…');
   try {
-    const r = await api.download(track.id);
+    await api.download(track.id);
     tg.haptic.success();
-    toast(r.cached ? 'Готово — файл уже в чате с ботом' : 'Готово — трек в чате с ботом. Его можно сохранить в «Музыку».');
+    toast('Готово — трек в чате с ботом. Открываю Telegram…');
+    // Take the user straight to the chat where the audio file just arrived.
+    setTimeout(() => tg.openBot(tg.botUsername ? `https://t.me/${tg.botUsername}` : undefined), 600);
   } catch (e) {
     tg.haptic.error();
     if (e instanceof ApiFailure && e.code === 'BOT_NOT_STARTED') {

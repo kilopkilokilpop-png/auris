@@ -71,6 +71,13 @@ export function registerInternalRoutes(app: FastifyInstance, s: Services) {
       return s.recognition.recognize(uid, await file.toBuffer(), file.mimetype, 'bot');
     });
 
+    r.get('/internal/playlist-invite', async (req) => {
+      const { token } = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/) }).parse(req.query);
+      const pl = await s.store.playlistByInvite(token);
+      if (!pl) throw new AppError('NOT_FOUND', 'Приглашение недействительно', 404);
+      return { title: pl.title, owner: pl.owner, trackCount: pl.n };
+    });
+
     r.post('/internal/reset', async (req) => {
       const { userId } = UserBody.parse(req.body);
       await s.store.resetRecommendations(userId);

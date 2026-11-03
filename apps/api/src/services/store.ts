@@ -64,7 +64,7 @@ export class Store {
     if (!u) return undefined;
     const [liked, playlists, listened] = await Promise.all([
       this.db.query<{ n: number }>('SELECT count(*)::int AS n FROM likes WHERE user_id=$1', [id]),
-      this.db.query<{ n: number }>('SELECT count(*)::int AS n FROM playlists WHERE user_id=$1', [id]),
+      this.db.query<{ n: number }>('SELECT count(*)::int AS n FROM playlist_members WHERE user_id=$1', [id]),
       this.db.query<{ s: number | null }>('SELECT COALESCE(sum(listened_sec),0)::float8 AS s FROM events WHERE user_id=$1', [id]),
     ]);
     return {
@@ -182,31 +182,79 @@ export class Store {
     return r.rows.map((x) => x.data);
   }
 
-  // ---------- playlists ----------
+  // ---------- playlists (shared: owner + editors) ----------
   async playlists(userId: number) {
-    const r = await this.db.query<{ id: number; title: string; created_at: Date | string; n: number; first: string | null }>(
-      `SELECT p.id, p.title, p.created_at, count(pt.track_id)::int AS n,
-              (SELECT track_id FROM playlist_tracks WHERE playlist_id=p.id ORDER BY added_at LIMIT 1) AS first
-       FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlist_id=p.id
-       WHERE p.user_id=$1 GROUP BY p.id ORDER BY p.created_at DESC`,
+    const r = await this.db.query<{ id: number; title: string; created_at: Date | string; role: 'owner' | 'editor'; n: number; members: number; first: string | null }>(
+      `SELECT p.id, p.title, p.created_at, m.role,
+              (SELECT count(*)::int FROM playlist_tracks pt WHERE pt.playlist_id = p.id) AS n,
+              (SELECT count(*)::int FROM playlist_members pm WHERE pm.playlist_id = p.id) AS members,
+              (SELECT track_id FROM playlist_tracks WHERE playlist_id = p.id ORDER BY added_at LIMIT 1) AS first
+       FROM playlists p JOIN playlist_members m ON m.playlist_id = p.id AND m.user_id = $1
+       ORDER BY p.created_at DESC`,
       [userId],
     );
     return r.rows;
   }
   async createPlaylist(userId: number, title: string) {
     const r = await this.db.query<{ id: number }>('INSERT INTO playlists (user_id, title) VALUES ($1,$2) RETURNING id', [userId, title]);
-    return r.rows[0]!.id;
+    const id = r.rows[0]!.id;
+    await this.db.query(`INSERT INTO playlist_members (playlist_id, user_id, role) VALUES ($1,$2,'owner')`, [id, userId]);
+    return id;
   }
-  async playlistOwned(userId: number, id: number) {
-    const r = await this.db.query<{ id: number; title: string }>('SELECT id, title FROM playlists WHERE id=$1 AND user_id=$2', [id, userId]);
+  /** Caller's access to a playlist, or undefined (not a member -> behaves as "not found"). */
+  async playlistAccess(userId: number, id: number) {
+    const r = await this.db.query<{ id: number; title: string; role: 'owner' | 'editor'; owner_id: number }>(
+      `SELECT p.id, p.title, m.role, p.user_id AS owner_id FROM playlists p
+       JOIN playlist_members m ON m.playlist_id = p.id AND m.user_id = $2 WHERE p.id = $1`,
+      [id, userId],
+    );
     return r.rows[0];
   }
-  async addToPlaylist(playlistId: number, trackId: string) {
-    await this.db.query('INSERT INTO playlist_tracks (playlist_id, track_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [playlistId, trackId]);
+  async addToPlaylist(playlistId: number, trackId: string, userId?: number) {
+    await this.db.query('INSERT INTO playlist_tracks (playlist_id, track_id, added_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [playlistId, trackId, userId ?? null]);
+  }
+  async removeFromPlaylist(playlistId: number, trackId: string) {
+    await this.db.query('DELETE FROM playlist_tracks WHERE playlist_id=$1 AND track_id=$2', [playlistId, trackId]);
+  }
+  async playlistTracks(playlistId: number) {
+    const r = await this.db.query<{ track_id: string; added_by: number | null }>('SELECT track_id, added_by FROM playlist_tracks WHERE playlist_id=$1 ORDER BY added_at', [playlistId]);
+    return r.rows;
   }
   async playlistTrackIds(playlistId: number) {
-    const r = await this.db.query<{ track_id: string }>('SELECT track_id FROM playlist_tracks WHERE playlist_id=$1 ORDER BY added_at', [playlistId]);
-    return r.rows.map((x) => x.track_id);
+    return (await this.playlistTracks(playlistId)).map((x) => x.track_id);
+  }
+  async playlistMembers(playlistId: number) {
+    const r = await this.db.query<{ user_id: number; first_name: string; last_name: string | null; role: 'owner' | 'editor' }>(
+      `SELECT m.user_id, u.first_name, u.last_name, m.role FROM playlist_members m JOIN users u ON u.id = m.user_id
+       WHERE m.playlist_id=$1 ORDER BY (m.role = 'owner') DESC, m.joined_at`,
+      [playlistId],
+    );
+    return r.rows.map((x) => ({ id: x.user_id, name: [x.first_name, x.last_name].filter(Boolean).join(' ') || 'Слушатель', role: x.role }));
+  }
+  /** Stable invite token per playlist (created on first invite). */
+  async playlistInviteToken(playlistId: number, fresh: string) {
+    await this.db.query('UPDATE playlists SET invite_token = COALESCE(invite_token, $2) WHERE id=$1', [playlistId, fresh]);
+    const r = await this.db.query<{ invite_token: string }>('SELECT invite_token FROM playlists WHERE id=$1', [playlistId]);
+    return r.rows[0]!.invite_token;
+  }
+  async playlistByInvite(token: string) {
+    const r = await this.db.query<{ id: number; title: string; owner: string; n: number; members: number }>(
+      `SELECT p.id, p.title, u.first_name AS owner,
+              (SELECT count(*)::int FROM playlist_tracks pt WHERE pt.playlist_id = p.id) AS n,
+              (SELECT count(*)::int FROM playlist_members pm WHERE pm.playlist_id = p.id) AS members
+       FROM playlists p JOIN users u ON u.id = p.user_id WHERE p.invite_token = $1`,
+      [token],
+    );
+    return r.rows[0];
+  }
+  async joinPlaylist(playlistId: number, userId: number) {
+    await this.db.query(`INSERT INTO playlist_members (playlist_id, user_id, role) VALUES ($1,$2,'editor') ON CONFLICT DO NOTHING`, [playlistId, userId]);
+  }
+  async leavePlaylist(playlistId: number, userId: number) {
+    await this.db.query(`DELETE FROM playlist_members WHERE playlist_id=$1 AND user_id=$2 AND role <> 'owner'`, [playlistId, userId]);
+  }
+  async deletePlaylist(playlistId: number) {
+    await this.db.query('DELETE FROM playlists WHERE id=$1', [playlistId]);
   }
 
   // ---------- search history ----------

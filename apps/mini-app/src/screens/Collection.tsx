@@ -1,13 +1,15 @@
-import type { Track } from '@auris/shared';
+import { plural, type Track } from '@auris/shared';
 import { Cover } from '../components/Cover';
-import { IconHeart, IconPlay } from '../components/Icons';
+import { IconHeart, IconMore, IconPlay, IconPlus } from '../components/Icons';
 import { Empty, ErrorState, SkeletonRows } from '../components/States';
 import { TrackList } from '../components/TrackRow';
 import { api } from '../lib/api';
 import { player } from '../lib/player';
-import { useQuery } from '../lib/store';
+import { go } from '../lib/router';
+import { refreshProfile, session } from '../lib/session';
+import { useQuery, useStore } from '../lib/store';
 import { tg } from '../lib/telegram';
-import { toast } from '../lib/ui';
+import { openSheet, toast } from '../lib/ui';
 import { BackButtonInline } from './Search';
 
 function Header({ title, sub, cover, round, tracks, context, onSave }: { title: string; sub?: string; cover?: string; round?: boolean; tracks: Track[]; context: string; onSave?: () => void }) {
@@ -76,13 +78,115 @@ export function ArtistScreen({ id }: { id: string }) {
   );
 }
 
+function Initials({ name }: { name: string }) {
+  return (
+    <span className="member" title={name} aria-hidden="true">
+      {name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+/** Shared playlist: everyone in it can add tracks and invite; the owner can delete it. */
 export function PlaylistScreen({ id, title }: { id: string; title: string }) {
   const q = useQuery(`pl:${id}`, () => api.playlist(id));
+  const me = useStore(session, (s) => s.profile?.id);
+  const p = q.data;
+  const invite = async () => {
+    try {
+      const { link } = await api.invite(id);
+      const res = await tg.share(link, `Присоединяйся к моему плейлисту «${p?.title ?? title}» в AURIS`);
+      if (res === 'copied') toast('Ссылка-приглашение скопирована');
+      if (res === 'failed') toast(link);
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
+  const remove = (t: Track) => {
+    if (!p || !(p.role === 'owner' || p.addedBy[t.id] === me)) return undefined;
+    return async () => {
+      tg.haptic.tap();
+      await api.removeFromPlaylist(id, t.id).catch((e: Error) => toast(e.message));
+      q.reload();
+    };
+  };
+  const del = () =>
+    openSheet({
+      kind: 'info',
+      title: p?.role === 'owner' ? 'Удалить плейлист?' : 'Выйти из плейлиста?',
+      body: p?.role === 'owner' ? 'Плейлист исчезнет у всех участников.' : 'Плейлист останется у остальных, вы сможете вернуться по ссылке.',
+      action: {
+        label: p?.role === 'owner' ? 'Удалить' : 'Выйти',
+        run: async () => {
+          await api.deletePlaylist(id);
+          tg.haptic.success();
+          toast(p?.role === 'owner' ? 'Плейлист удалён' : 'Вы вышли из плейлиста');
+          void refreshProfile();
+          go.back();
+        },
+      },
+    });
+  const others = (p?.members.length ?? 1) - 1;
   return (
     <main className="screen overlay" aria-label="Плейлист">
-      <Header title={q.data?.title ?? title} sub="Плейлист" cover={q.data?.tracks[0]?.coverUrl} tracks={q.data?.tracks ?? []} context={q.data?.title ?? title} />
+      <Header
+        title={p?.title ?? title}
+        sub={p ? (others > 0 ? `Совместный · ${p.members.length} ${plural(p.members.length, ['участник', 'участника', 'участников'])}` : 'Ваш плейлист') : 'Плейлист'}
+        cover={p?.tracks[0]?.coverUrl}
+        tracks={p?.tracks ?? []}
+        context={p?.title ?? title}
+      />
+      {p ? (
+        <>
+          <div className="btn-row" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
+            <button type="button" className="btn ghost" onClick={() => void invite()}>
+              <IconPlus style={{ width: 18, height: 18 }} /> Пригласить друзей
+            </button>
+            <button type="button" className="icon-btn glass" aria-label={p.role === 'owner' ? 'Ещё: удалить плейлист' : 'Ещё: выйти из плейлиста'} onClick={del}>
+              <IconMore />
+            </button>
+          </div>
+          <div className="members" aria-label="Участники">
+            {p.members.map((m) => (
+              <span key={m.id} className="member-chip">
+                <Initials name={m.name} />
+                {m.id === me ? 'Вы' : m.name}
+                {m.role === 'owner' ? <small> · владелец</small> : null}
+              </span>
+            ))}
+          </div>
+        </>
+      ) : null}
       <div style={{ marginTop: 16 }}>
-        <Body loading={q.loading} error={q.error} reload={q.reload} tracks={q.data?.tracks} context={title} />
+        {q.loading && !p ? <SkeletonRows n={5} /> : null}
+        {q.error ? <ErrorState error={q.error} onRetry={q.reload} /> : null}
+        {p && !p.tracks.length ? (
+          <Empty title="Пока пусто">Добавляйте треки через «…» → «Добавить в плейлист». Пригласите друзей — они тоже смогут добавлять.</Empty>
+        ) : null}
+        {p?.tracks.length ? (
+          <TrackList
+            tracks={p.tracks}
+            context={p.title}
+            sub={(t) => {
+              const by = p.addedBy[t.id];
+              const who = by && by !== me ? p.members.find((m) => m.id === by)?.name : undefined;
+              return who ? `${t.artist.name} · добавил(а) ${who}` : undefined;
+            }}
+            onRemove={remove}
+          />
+        ) : null}
+      </div>
+    </main>
+  );
+}
+
+/** Curated collection (mood / genre). */
+export function CollectionScreen({ id, title }: { id: string; title: string }) {
+  const q = useQuery(`col:${id}`, () => api.collection(id));
+  return (
+    <main className="screen overlay" aria-label="Подборка">
+      <Header title={q.data?.title ?? title} sub={q.data?.subtitle ?? 'Подборка AURIS'} cover={q.data?.tracks[0]?.coverUrl} tracks={q.data?.tracks ?? []} context={q.data?.title ?? title} />
+      <div style={{ marginTop: 16 }}>
+        <Body loading={q.loading} error={q.error} reload={q.reload} tracks={q.data?.tracks} context={q.data?.title ?? title} />
       </div>
     </main>
   );

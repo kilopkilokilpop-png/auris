@@ -166,3 +166,76 @@ test('forbidden download is refused by the API even when called directly', async
   const unauth = await request.post('/api/downloads', { data: { trackId: 'mock:t1' } });
   expect(unauth.status()).toBe(401);
 });
+
+test('volume and like work from the mini player, download sits in the full player', async ({ page }) => {
+  await open(page, 2101);
+  await page.getByRole('button', { name: 'Слушать Полярный свет' }).click();
+  const mini = page.getByRole('region', { name: 'Сейчас играет' });
+  await expect(mini).toContainText('Магнитное поле');
+  // Like without opening the player
+  await mini.getByRole('button', { name: 'В избранное' }).click();
+  await expect(mini.getByRole('button', { name: 'Убрать из избранного' })).toBeVisible();
+  // Volume without opening the player
+  await mini.getByRole('button', { name: 'Громкость' }).click();
+  const vol = page.getByRole('dialog', { name: 'Громкость' });
+  await vol.getByRole('button', { name: 'Тише' }).click();
+  await vol.getByRole('button', { name: 'Тише' }).click();
+  await expect.poll(() => page.evaluate(() => document.querySelector('audio')!.volume)).toBeCloseTo(0.8, 2);
+  await vol.getByRole('button', { name: 'Громче' }).click();
+  await expect.poll(() => page.evaluate(() => document.querySelector('audio')!.volume)).toBeCloseTo(0.9, 2);
+  // Full player: volume slider + download button
+  await mini.getByRole('button', { name: /Открыть плеер/ }).click();
+  const player = page.getByRole('dialog', { name: 'Плеер' });
+  await expect(player.getByRole('group', { name: 'Громкость' })).toBeVisible();
+  await player.getByRole('button', { name: 'Скачать в Telegram' }).click();
+  // No bot token in this test run: the server explains instead of failing silently.
+  await expect(page.getByRole('status').filter({ hasText: /Бот ещё не настроен|BOT_TOKEN/ })).toBeVisible();
+});
+
+test('curated collections open from home', async ({ page }) => {
+  await open(page, 2102);
+  await page.getByRole('heading', { name: 'Подборки' }).scrollIntoViewIfNeeded();
+  await page.getByRole('button', { name: /Спокойствие/ }).click();
+  await expect(page.getByRole('main', { name: 'Подборка' }).getByRole('heading', { name: 'Спокойствие' })).toBeVisible();
+  await expect(page.getByRole('main', { name: 'Подборка' }).locator('.list .row').first()).toBeVisible();
+});
+
+test('playlists: create, add a track, invite friends, a friend joins by link', async ({ page, browser }) => {
+  await open(page, 2103);
+  await page.getByRole('tab', { name: 'Профиль' }).click();
+  await page.getByRole('radio', { name: 'Плейлисты' }).click();
+  await page.getByPlaceholder('Новый плейлист').fill('Дорога домой');
+  await page.getByRole('button', { name: 'Создать', exact: true }).click();
+  const pl = page.getByRole('main', { name: 'Плейлист' });
+  await expect(pl.getByRole('heading', { name: 'Дорога домой' })).toBeVisible();
+  await expect(pl.getByText('Ваш плейлист')).toBeVisible();
+  await expect(pl.getByText('Пока пусто')).toBeVisible();
+  // Add a track from search
+  await page.getByRole('button', { name: 'Назад' }).click();
+  await page.getByRole('tab', { name: 'Главная' }).click();
+  await page.getByRole('button', { name: 'Поиск' }).click();
+  await page.getByRole('button', { name: 'Действия: Тихий час' }).click();
+  await page.getByRole('dialog').getByText('Добавить в плейлист').click();
+  await page.getByRole('dialog').getByRole('button', { name: /Дорога домой/ }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Добавлено в «Дорога домой»' })).toBeVisible();
+
+  // Invite link (server side) and a second user joining through the deep link
+  const auth = async (uid: number) => `tma ${await page.evaluate(async (id) => (await (await fetch(`/api/dev/init-data?id=${id}`)).json()).initData as string, uid)}`;
+  const list = await (await page.request.get('/api/playlists', { headers: { authorization: await auth(2103) } })).json();
+  const pid = list.playlists[0].id as string;
+  const { token, link } = await (await page.request.post(`/api/playlists/${pid}/invite`, { headers: { authorization: await auth(2103) } })).json();
+  expect(link).toContain(token);
+
+  const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const friend = await ctx2.newPage();
+  await friend.goto(`/?uid=2104&join=${token}`);
+  const sheet = friend.getByRole('dialog', { name: 'Плейлист «Дорога домой»' });
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole('button', { name: 'Присоединиться' }).click();
+  const fpl = friend.getByRole('main', { name: 'Плейлист' });
+  await expect(fpl.getByText(/Совместный · 2 участника/)).toBeVisible();
+  await expect(fpl.getByRole('button', { name: /^Тихий час,/ })).toBeVisible();
+  // A friend cannot remove the owner's track (no remove button), the owner can
+  await expect(fpl.getByRole('button', { name: 'Убрать из плейлиста: Тихий час' })).toHaveCount(0);
+  await ctx2.close();
+});

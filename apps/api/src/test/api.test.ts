@@ -216,3 +216,66 @@ describe('internal routes in the all-in-one deploy', () => {
     await c.app.close();
   });
 });
+
+describe('shared playlists', () => {
+  it('owner invites, friend joins and adds, rights are enforced', async () => {
+    const owner = auth(1001, 'Аня');
+    const friend = auth(1002, 'Борис');
+    const stranger = auth(1003, 'Чужой');
+    const { id } = (await app.inject({ method: 'POST', url: '/api/playlists', headers: owner, payload: { title: 'Дорога' } })).json();
+    await app.inject({ method: 'POST', url: `/api/playlists/${id}/tracks`, headers: owner, payload: { trackId: 'mock:t1' } });
+
+    // Not a member yet: looks like it does not exist
+    expect((await app.inject({ method: 'GET', url: `/api/playlists/${id}`, headers: friend })).statusCode).toBe(404);
+
+    const inv = (await app.inject({ method: 'POST', url: `/api/playlists/${id}/invite`, headers: owner })).json();
+    expect(inv.link).toBe(`https://t.me/auris_test_bot?start=pl_${inv.token}`);
+    // Same token on repeat
+    expect((await app.inject({ method: 'POST', url: `/api/playlists/${id}/invite`, headers: owner })).json().token).toBe(inv.token);
+
+    const preview = (await app.inject({ method: 'GET', url: `/api/playlists/invite/${inv.token}`, headers: friend })).json();
+    expect(preview).toMatchObject({ title: 'Дорога', owner: 'Аня', trackCount: 1, memberCount: 1 });
+    expect((await app.inject({ method: 'POST', url: '/api/playlists/join', headers: friend, payload: { token: inv.token } })).json()).toEqual({ id, title: 'Дорога' });
+
+    await app.inject({ method: 'POST', url: `/api/playlists/${id}/tracks`, headers: friend, payload: { trackId: 'mock:t2' } });
+    const detail = (await app.inject({ method: 'GET', url: `/api/playlists/${id}`, headers: owner })).json();
+    expect(detail.tracks.map((t: { id: string }) => t.id)).toEqual(['mock:t1', 'mock:t2']);
+    expect(detail.members.map((m: { name: string; role: string }) => `${m.name}:${m.role}`)).toEqual(['Аня:owner', 'Борис:editor']);
+    expect(detail.addedBy['mock:t2']).toBe(1002);
+
+    const list = (await app.inject({ method: 'GET', url: '/api/playlists', headers: friend })).json().playlists;
+    expect(list[0]).toMatchObject({ id, role: 'editor', memberCount: 2, trackCount: 2 });
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: friend })).json().stats.playlists).toBe(1);
+
+    // Friend cannot remove the owner's track, can remove their own
+    expect((await app.inject({ method: 'DELETE', url: `/api/playlists/${id}/tracks/mock:t1`, headers: friend })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'DELETE', url: `/api/playlists/${id}/tracks/mock:t2`, headers: friend })).statusCode).toBe(200);
+    // Stranger cannot touch it
+    expect((await app.inject({ method: 'POST', url: `/api/playlists/${id}/tracks`, headers: stranger, payload: { trackId: 'mock:t3' } })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: '/api/playlists/join', headers: stranger, payload: { token: 'not-a-real-token' } })).statusCode).toBe(404);
+
+    // Friend leaves (playlist stays); owner deletes for everyone
+    expect((await app.inject({ method: 'DELETE', url: `/api/playlists/${id}`, headers: friend })).json()).toEqual({ ok: true, deleted: false });
+    expect((await app.inject({ method: 'GET', url: `/api/playlists/${id}`, headers: owner })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'DELETE', url: `/api/playlists/${id}`, headers: owner })).json()).toEqual({ ok: true, deleted: true });
+    expect((await app.inject({ method: 'GET', url: `/api/playlists/${id}`, headers: owner })).statusCode).toBe(404);
+  });
+  it('bot can look up an invite', async () => {
+    const owner = auth(1010, 'Вера');
+    const { id } = (await app.inject({ method: 'POST', url: '/api/playlists', headers: owner, payload: { title: 'Субботa' } })).json();
+    const { token } = (await app.inject({ method: 'POST', url: `/api/playlists/${id}/invite`, headers: owner })).json();
+    const r = await app.inject({ method: 'GET', url: `/internal/playlist-invite?token=${token}`, headers: { 'x-internal-secret': 'internal-secret' } });
+    expect(r.json()).toMatchObject({ title: 'Субботa', owner: 'Вера', trackCount: 0 });
+  });
+});
+
+describe('collections', () => {
+  it('lists curated playlists and fills one with playable tracks, full first', async () => {
+    const list = (await app.inject({ method: 'GET', url: '/api/collections', headers: auth() })).json().collections;
+    expect(list.length).toBeGreaterThanOrEqual(8);
+    const calm = (await app.inject({ method: 'GET', url: '/api/collections/mood-calm', headers: auth() })).json();
+    expect(calm.tracks.length).toBeGreaterThan(0);
+    expect(calm.tracks.every((t: { playback: { kind: string } }) => t.playback.kind !== 'none')).toBe(true);
+    expect((await app.inject({ method: 'GET', url: '/api/collections/nope', headers: auth() })).statusCode).toBe(404);
+  });
+});

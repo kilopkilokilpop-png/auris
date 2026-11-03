@@ -80,3 +80,37 @@ test('screens for design comparison', async ({ page }) => {
   await page.getByRole('button', { name: /Действия: Магнитное поле/ }).click();
   await shot(page, 'track-menu');
 });
+
+test('screens: new features (volume, collections, shared playlist)', async ({ page }) => {
+  await page.goto('/?uid=3002');
+  await expect(page.getByRole('tab', { name: 'Главная' })).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  await page.getByRole('heading', { name: 'Подборки' }).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  await shot(page, 'home-collections');
+  await page.getByRole('button', { name: /^Слушать Полярный свет/ }).click({ force: true });
+  const mini = page.getByRole('region', { name: 'Сейчас играет' });
+  await mini.getByRole('button', { name: 'Громкость' }).click();
+  await page.waitForTimeout(300);
+  await shot(page, 'mini-volume');
+  await mini.getByRole('button', { name: 'Громкость' }).click();
+  await mini.getByRole('button', { name: /Открыть плеер/ }).click();
+  await page.getByRole('dialog', { name: 'Плеер' }).getByRole('group', { name: 'Громкость' }).waitFor();
+  await page.evaluate(() => document.querySelector('audio')!.pause());
+  await page.waitForTimeout(400);
+  await shot(page, 'player-volume');
+  await page.getByRole('button', { name: 'Свернуть плеер' }).click();
+  const authz = `tma ${await page.evaluate(async () => (await (await fetch('/api/dev/init-data?id=3002')).json()).initData as string)}`;
+  const friend = `tma ${await page.evaluate(async () => (await (await fetch('/api/dev/init-data?id=3003&name=Борис&last=К')).json()).initData as string)}`;
+  const { id } = await (await page.request.post('/api/playlists', { headers: { authorization: authz, 'content-type': 'application/json' }, data: { title: 'Дорога домой' } })).json();
+  for (const t of ['mock:t6', 'mock:t1', 'mock:t20']) await page.request.post(`/api/playlists/${id}/tracks`, { headers: { authorization: authz, 'content-type': 'application/json' }, data: { trackId: t } });
+  const { token } = await (await page.request.post(`/api/playlists/${id}/invite`, { headers: { authorization: authz } })).json();
+  await page.request.post('/api/playlists/join', { headers: { authorization: friend, 'content-type': 'application/json' }, data: { token } });
+  await page.request.post(`/api/playlists/${id}/tracks`, { headers: { authorization: friend, 'content-type': 'application/json' }, data: { trackId: 'mock:t10' } });
+  await page.getByRole('tab', { name: 'Профиль' }).click();
+  await page.getByRole('radio', { name: 'Плейлисты' }).click();
+  await page.getByRole('button', { name: /Дорога домой/ }).click();
+  await page.getByRole('main', { name: 'Плейлист' }).getByText('Совместный · 2 участника').waitFor();
+  await page.waitForTimeout(400);
+  await shot(page, 'playlist-shared');
+});

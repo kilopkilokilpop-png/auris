@@ -125,6 +125,7 @@ export type DownloadDecisionDto = z.infer<typeof DownloadDecisionSchema>;
 
 export const PlaylistCreateSchema = z.object({ title: z.string().trim().min(1).max(64) });
 export const PlaylistAddSchema = z.object({ trackId: TrackIdSchema });
+export const PlaylistJoinSchema = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/) });
 
 /** Max recognition upload, bytes. ~10s of any browser codec is far below this. */
 export const RECOGNITION_MAX_BYTES = 3 * 1024 * 1024;

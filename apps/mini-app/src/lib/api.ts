@@ -1,6 +1,8 @@
 import type {
   Album,
   ApiError,
+  Collection,
+  PlaylistDetail,
   Artist,
   CatalogCapabilities,
   ErrorCode,
@@ -86,9 +88,16 @@ export const api = {
   unlikeAlbum: (id: string) => request<{ ok: true }>('DELETE', `/api/albums/${encodeURIComponent(id)}/like`),
 
   playlists: () => request<{ playlists: Playlist[] }>('GET', '/api/playlists'),
-  playlist: (id: string) => request<{ id: string; title: string; tracks: Track[] }>('GET', `/api/playlists/${id}`),
+  playlist: (id: string) => request<PlaylistDetail>('GET', `/api/playlists/${id}`),
   createPlaylist: (title: string) => request<{ id: string }>('POST', '/api/playlists', { title }),
   addToPlaylist: (pid: string, trackId: string) => request<{ ok: true }>('POST', `/api/playlists/${pid}/tracks`, { trackId }),
+  removeFromPlaylist: (pid: string, trackId: string) => request<{ ok: true }>('DELETE', `/api/playlists/${pid}/tracks/${encodeURIComponent(trackId)}`),
+  invite: (pid: string) => request<{ token: string; link: string }>('POST', `/api/playlists/${pid}/invite`),
+  invitePreview: (token: string) => request<{ title: string; owner: string; trackCount: number; memberCount: number }>('GET', `/api/playlists/invite/${encodeURIComponent(token)}`),
+  joinPlaylist: (token: string) => request<{ id: string; title: string }>('POST', '/api/playlists/join', { token }),
+  deletePlaylist: (pid: string) => request<{ ok: true; deleted: boolean }>('DELETE', `/api/playlists/${pid}`),
+  collections: () => request<{ collections: Collection[] }>('GET', '/api/collections'),
+  collection: (id: string) => request<{ id: string; title: string; subtitle: string; tracks: Track[] }>('GET', `/api/collections/${encodeURIComponent(id)}`),
 
   waveNext: (body: { mood: Mood; mode: WaveMode; exclude: string[]; recentArtists: string[]; count: number }) =>
     request<{ items: WaveItem[] }>('POST', '/api/wave/next', body),

@@ -148,6 +148,25 @@ export const tg = {
     warning: () => safe(() => hapticFeedback.notificationOccurred('warning')),
     error: () => safe(() => hapticFeedback.notificationOccurred('error')),
   },
+  /** Telegram's native "send to chat" picker; Web Share / clipboard outside Telegram. */
+  async share(url: string, text: string): Promise<'telegram' | 'native' | 'copied' | 'failed'> {
+    const tgShare = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+    if (state.mode === 'telegram' && safe(() => openTelegramLink(tgShare)) !== undefined) return 'telegram';
+    try {
+      if (navigator.share) {
+        await navigator.share({ url, text });
+        return 'native';
+      }
+    } catch {
+      /* cancelled */
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      return 'copied';
+    } catch {
+      return 'failed';
+    }
+  },
   openBot(link?: string) {
     const url = link ?? (state.botUsername ? `https://t.me/${state.botUsername}?start=download` : undefined);
     if (!url) return false;

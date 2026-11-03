@@ -26,6 +26,10 @@ export interface PlayerState {
   streamKind: 'full' | 'preview' | null;
   error: string | null;
   expanded: boolean;
+  /** 0..1 */
+  volume: number;
+  /** iOS WebViews ignore HTMLMediaElement.volume: only the hardware buttons change it. */
+  volumeSupported: boolean;
 }
 
 const initial: PlayerState = {
@@ -44,7 +48,19 @@ const initial: PlayerState = {
   streamKind: null,
   error: null,
   expanded: false,
+  volume: 1,
+  volumeSupported: true,
 };
+
+const VOLUME_KEY = 'auris.volume';
+function savedVolume(): number {
+  try {
+    const v = Number(localStorage.getItem(VOLUME_KEY));
+    return Number.isFinite(v) && v > 0 && v <= 1 ? v : 1;
+  } catch {
+    return 1;
+  }
+}
 
 // 0.1 s of silence — used to unlock the <audio> element synchronously inside a user gesture (iOS).
 const SILENCE = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
@@ -94,6 +110,27 @@ class Player {
       this.store.set({ error: 'Не удалось воспроизвести трек', loading: false, playing: false });
     });
     this.setupMediaSession();
+    // Feature-detect writable volume (iOS keeps it at 1).
+    a.volume = 0.5;
+    const supported = Math.abs(a.volume - 0.5) < 0.01;
+    a.volume = supported ? savedVolume() : 1;
+    this.store.set({ volumeSupported: supported, volume: a.volume });
+  }
+
+  setVolume(v: number) {
+    const vol = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100;
+    this.audio.volume = vol;
+    this.store.set({ volume: vol });
+    try {
+      if (vol > 0) localStorage.setItem(VOLUME_KEY, String(vol));
+    } catch {
+      /* private mode */
+    }
+  }
+  /** +/- buttons: 10% steps. */
+  stepVolume(dir: 1 | -1) {
+    tg.haptic.select();
+    this.setVolume(this.state.volume + dir * 0.1);
   }
 
   get state() {

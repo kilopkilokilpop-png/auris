@@ -20,6 +20,7 @@ export interface AurisApi {
   recognize(userId: number, audio: Buffer, mime: string, filename: string): Promise<Recognition>;
   resetRecommendations(userId: number): Promise<void>;
   deleteUser(userId: number): Promise<void>;
+  playlistInvite(token: string): Promise<{ title: string; owner: string; trackCount: number } | null>;
 }
 
 export class HttpAurisApi implements AurisApi {
@@ -66,5 +67,13 @@ export class HttpAurisApi implements AurisApi {
   }
   async deleteUser(userId: number) {
     await this.call('POST', '/internal/delete', { userId });
+  }
+  async playlistInvite(token: string) {
+    try {
+      return await this.call<{ title: string; owner: string; trackCount: number }>('GET', `/internal/playlist-invite?token=${encodeURIComponent(token)}`);
+    } catch (e) {
+      if (e instanceof ApiCallError && e.code === 'NOT_FOUND') return null;
+      throw e;
+    }
   }
 }

@@ -15,7 +15,8 @@ function harness(api: Partial<AurisApi> = {}) {
   const fake: AurisApi = {
     touchUser: async () => {}, search: async () => [track('mock:t1', true), track('deezer:1', false, 'preview')], liked: async () => [],
     like: async () => {}, download: async () => ({ status: 'sent' }), recognize: async () => { throw new Error('x'); },
-    resetRecommendations: async () => {}, deleteUser: async () => {}, ...api,
+    resetRecommendations: async () => {}, deleteUser: async () => {},
+    playlistInvite: async (t: string) => (t === 'goodtoken123' ? { title: 'Дорога', owner: 'Аня', trackCount: 4 } : null), ...api,
   };
   const bot = createBot(fake, {
     token: '1:x', miniAppUrl: 'https://app.auris.test',
@@ -38,6 +39,15 @@ describe('bot', () => {
     await h.bot.handleUpdate(h.text('/start'));
     const kb = (h.calls[0]!.payload.reply_markup as { inline_keyboard: { web_app?: { url: string } }[][] }).inline_keyboard;
     expect(kb[0]![0]!.web_app!.url).toBe('https://app.auris.test/');
+  });
+  it('/start with a playlist invite offers to open it', async () => {
+    const h = harness();
+    await h.bot.handleUpdate(h.text('/start pl_goodtoken123'));
+    expect(String(h.calls[0]!.payload.text)).toContain('Аня');
+    expect(String(h.calls[0]!.payload.text)).toContain('Дорога');
+    expect(JSON.stringify(h.calls[0]!.payload.reply_markup)).toContain('join=goodtoken123');
+    await h.bot.handleUpdate(h.text('/start pl_badtoken0000'));
+    expect(String(h.calls[1]!.payload.text)).toContain('больше не действует');
   });
   it('/wave opens the wave screen', async () => {
     const h = harness();

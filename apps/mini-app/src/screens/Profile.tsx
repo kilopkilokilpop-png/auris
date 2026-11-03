@@ -8,7 +8,9 @@ import { TrackList } from '../components/TrackRow';
 import { api } from '../lib/api';
 import { player } from '../lib/player';
 import { go } from '../lib/router';
-import { session } from '../lib/session';
+import { refreshProfile, session } from '../lib/session';
+import { tg } from '../lib/telegram';
+import { toast } from '../lib/ui';
 import { useQuery, useStore } from '../lib/store';
 
 type TabId = 'tracks' | 'albums' | 'playlists' | 'hear';
@@ -24,6 +26,21 @@ export function Profile() {
   const tracks = useQuery(tab === 'tracks' ? `liked:${likedVersion}` : null, () => api.liked());
   const albums = useQuery(tab === 'albums' ? 'albums' : null, () => api.likedAlbums());
   const lists = useQuery(tab === 'playlists' ? 'playlists' : null, () => api.playlists());
+  const [newTitle, setNewTitle] = useState('');
+  const create = async () => {
+    const t = newTitle.trim();
+    if (!t) return;
+    try {
+      const { id } = await api.createPlaylist(t);
+      tg.haptic.success();
+      setNewTitle('');
+      void refreshProfile();
+      lists.reload();
+      go.push({ name: 'playlist', id, title: t });
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
   const hear = useQuery(tab === 'hear' ? 'hear' : null, () => api.recognitions());
   const name = p ? [p.firstName, p.lastName].filter(Boolean).join(' ') : '';
   const initial = (p?.firstName || 'A').slice(0, 1).toUpperCase();
@@ -118,6 +135,23 @@ export function Profile() {
           )
         ) : null}
         {tab === 'playlists' ? (
+          <form
+            className="create-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void create();
+            }}
+          >
+            <label className="search-box glass">
+              <span className="sr-only">Название нового плейлиста</span>
+              <input placeholder="Новый плейлист" value={newTitle} maxLength={64} onChange={(e) => setNewTitle(e.target.value)} />
+            </label>
+            <button type="submit" className="btn primary" disabled={!newTitle.trim()}>
+              Создать
+            </button>
+          </form>
+        ) : null}
+        {tab === 'playlists' ? (
           lists.loading ? (
             <SkeletonRows />
           ) : lists.error ? (
@@ -132,6 +166,7 @@ export function Profile() {
                       <span className="row-title" style={{ display: 'block' }}>{pl.title}</span>
                       <span className="row-sub" style={{ display: 'block' }}>
                         {pl.trackCount} {plural(pl.trackCount, ['трек', 'трека', 'треков'])}
+                        {pl.memberCount > 1 ? ` · совместный, ${pl.memberCount} ${plural(pl.memberCount, ['участник', 'участника', 'участников'])}` : ''}
                       </span>
                     </span>
                   </button>
@@ -139,7 +174,7 @@ export function Profile() {
               ))}
             </ul>
           ) : (
-            <Empty title="Плейлистов пока нет">В меню «…» у любого трека выберите «Добавить в плейлист».</Empty>
+            <Empty title="Плейлистов пока нет">Создайте плейлист выше и пригласите друзей — добавлять треки смогут все участники.</Empty>
           )
         ) : null}
         {tab === 'hear' ? (

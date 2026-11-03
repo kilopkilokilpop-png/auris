@@ -163,3 +163,15 @@ export const IconSend = (p: P) => (
     <path d="m4 12 16-7.5L13.5 20l-2.3-6.2z" />
   </Svg>
 );
+export const IconVolume = ({ level = 1, ...p }: P & { level?: number }) => (
+  <Svg {...p}>
+    <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor" stroke="none" />
+    {level > 0 ? <path d="M15 9.5a3.5 3.5 0 0 1 0 5" /> : <path d="m15.5 9.5 5 5m0-5-5 5" />}
+    {level > 0.5 ? <path d="M17.8 6.8a7.5 7.5 0 0 1 0 10.4" /> : null}
+  </Svg>
+);
+export const IconMinus = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 12h14" />
+  </Svg>
+);

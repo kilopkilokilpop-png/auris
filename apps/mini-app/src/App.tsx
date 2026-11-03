@@ -9,7 +9,8 @@ import { go, nav, useTelegramBackButton, type Overlay } from './lib/router';
 import { loadSession } from './lib/session';
 import { useStore } from './lib/store';
 import { tg } from './lib/telegram';
-import { AlbumScreen, ArtistScreen, PlaylistScreen } from './screens/Collection';
+import { AlbumScreen, ArtistScreen, CollectionScreen, PlaylistScreen } from './screens/Collection';
+import { openSheet, toast } from './lib/ui';
 import { Hear } from './screens/Hear';
 import { Home } from './screens/Home';
 import { Onboarding } from './screens/Onboarding';
@@ -35,6 +36,8 @@ function OverlayView({ o }: { o: Overlay }) {
       return <PlaylistScreen id={o.id} title={o.title} />;
     case 'onboarding':
       return <Onboarding />;
+    case 'collection':
+      return <CollectionScreen id={o.id} title={o.title} />;
   }
 }
 
@@ -42,10 +45,30 @@ function OverlayView({ o }: { o: Overlay }) {
 async function applyDeepLink() {
   const p = new URLSearchParams(location.search);
   const start = tg.startParam;
-  const screen = p.get('screen') ?? (start && !start.startsWith('track_') ? start : null);
+  const screen = p.get('screen') ?? (start && !start.startsWith('track_') && !start.startsWith('pl_') ? start : null);
   if (screen === 'wave' || screen === 'hear' || screen === 'profile') go.tab(screen);
   if (screen === 'settings') go.push({ name: 'settings' });
   if (screen === 'search') go.push({ name: 'search' });
+  // Shared playlist invite: ?join=<token> (bot button) or start_param pl_<token> (t.me/<bot>/app?startapp=…)
+  const join = p.get('join') ?? (start?.startsWith('pl_') ? start.slice(3) : null);
+  if (join && /^[A-Za-z0-9_-]{8,64}$/.test(join)) {
+    const inv = await api.invitePreview(join).catch(() => null);
+    if (!inv) toast('Приглашение в плейлист больше не действует');
+    else
+      openSheet({
+        kind: 'info',
+        title: `Плейлист «${inv.title}»`,
+        body: `${inv.owner} приглашает вас: ${inv.trackCount} тр., участников — ${inv.memberCount}. Вместе вы сможете добавлять треки.`,
+        action: {
+          label: 'Присоединиться',
+          run: async () => {
+            const r = await api.joinPlaylist(join);
+            toast(`Вы в плейлисте «${r.title}»`);
+            go.push({ name: 'playlist', id: r.id, title: r.title });
+          },
+        },
+      });
+  }
   const trackId = p.get('track') ?? (start?.startsWith('track_') ? start.slice(6).replace('_', ':') : null);
   if (trackId) {
     const t = await api.track(trackId).catch(() => null);

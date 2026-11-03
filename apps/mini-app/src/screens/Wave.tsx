@@ -4,7 +4,7 @@ import { Cover } from '../components/Cover';
 import { IconHeart, IconNext, IconPause, IconPlay, IconThumbDown } from '../components/Icons';
 import { Segmented } from '../components/Segmented';
 import { player } from '../lib/player';
-import { go } from '../lib/router';
+import { go, openPlayer } from '../lib/router';
 import { session, toggleLike } from '../lib/session';
 import { useStore } from '../lib/store';
 import { tg } from '../lib/telegram';
@@ -84,7 +84,7 @@ export function Wave() {
 
       {track ? (
         <div className="wave-now glass">
-          <button type="button" className="mini-open" onClick={() => player.expand(true)} aria-label={`Открыть плеер: ${track.title}`}>
+          <button type="button" className="mini-open" onClick={() => openPlayer()} aria-label={`Открыть плеер: ${track.title}`}>
             <Cover src={track.coverUrl} className="sm" />
             <span className="row-text">
               <span className="row-title" style={{ display: 'block', fontSize: 14 }}>

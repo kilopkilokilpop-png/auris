@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { formatDuration } from '@auris/shared';
-import { IconChevronDown, IconHeart, IconInfo, IconMore, IconNext, IconPause, IconPlay, IconPrev, IconRepeat, IconShuffle, IconThumbDown, LogoMark } from '../components/Icons';
+import { IconChevronDown, IconDownload, IconHeart, IconInfo, IconMore, IconNext, IconPause, IconPlay, IconPrev, IconRepeat, IconShuffle, IconThumbDown, LogoMark } from '../components/Icons';
+import { VolumeControl } from '../components/Volume';
+import { closePlayer } from '../lib/router';
 import { player } from '../lib/player';
-import { session, toggleLike } from '../lib/session';
+import { downloadToTelegram, session, toggleLike } from '../lib/session';
 import { useStore } from '../lib/store';
 import { openSheet } from '../lib/ui';
 
@@ -22,7 +24,7 @@ export function Player() {
   return (
     <section className="player" role="dialog" aria-modal="true" aria-label="Плеер">
       <div className="player-top">
-        <button ref={closeRef} type="button" className="icon-btn glass" aria-label="Свернуть плеер" onClick={() => player.expand(false)}>
+        <button ref={closeRef} type="button" className="icon-btn glass" aria-label="Свернуть плеер" onClick={() => closePlayer()}>
           <IconChevronDown />
         </button>
         <div className="player-from">
@@ -34,8 +36,8 @@ export function Player() {
         </button>
       </div>
 
-      <div className="player-art">
-        {track.coverUrl ? <img src={track.coverUrl} alt={`Обложка: ${track.title}`} /> : <LogoMark size={140} />}
+      <div className="player-art now-cover">
+        {track.coverUrl ? <img key={track.coverUrl} src={track.coverUrl} alt={`Обложка: ${track.title}`} onLoad={(e) => e.currentTarget.classList.add('loaded')} /> : <LogoMark size={140} />}
       </div>
 
       <div className="player-meta">
@@ -48,8 +50,18 @@ export function Player() {
             <IconThumbDown />
           </button>
         ) : null}
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Скачать в Telegram"
+          aria-disabled={!track.downloadable || undefined}
+          onClick={() => void downloadToTelegram(track)}
+          style={{ opacity: track.downloadable ? 1 : 0.45 }}
+        >
+          <IconDownload />
+        </button>
         <button type="button" className="icon-btn" aria-pressed={liked} aria-label={liked ? 'Убрать из избранного' : 'В избранное'} onClick={() => void toggleLike(track)}>
-          <IconHeart filled={liked} style={{ width: 26, height: 26 }} />
+          <IconHeart filled={liked} key={liked ? 'on' : 'off'} className={`icon ${liked ? 'liked' : ''}`} style={{ width: 26, height: 26 }} />
         </button>
       </div>
 
@@ -113,6 +125,7 @@ export function Player() {
             {s.repeat === 'one' ? <span className="repeat-one">1</span> : null}
           </button>
         </div>
+        <VolumeControl />
       </div>
     </section>
   );
