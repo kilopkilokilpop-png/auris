@@ -13,7 +13,27 @@ export interface Db {
   readonly kind: 'postgres' | 'pglite';
 }
 
-export async function createPostgresDb(url: string): Promise<Db> {
+/**
+ * DATABASE_URL may list several candidates separated by commas (e.g. Supabase pooler hosts
+ * aws-0-… and aws-1-…): the first one that answers `SELECT 1` is used.
+ */
+export async function createPostgresDb(urls: string): Promise<Db> {
+  const list = urls.split(',').map((u) => u.trim()).filter(Boolean);
+  let last: unknown;
+  for (const url of list) {
+    try {
+      const db = await connectPostgres(url);
+      await Promise.race([db.query('SELECT 1'), new Promise((_, rej) => setTimeout(() => rej(new Error('connect timeout')), 15_000))]);
+      return db;
+    } catch (e) {
+      last = e;
+      if (list.length > 1) console.warn(`[db] candidate failed (${new URL(url).hostname}): ${(e as Error).message}`);
+    }
+  }
+  throw last instanceof Error ? last : new Error('No database URL');
+}
+
+async function connectPostgres(url: string): Promise<Db> {
   const pg = await import('pg');
   const Pool = pg.default.Pool;
   // BIGINT -> number (Telegram ids fit in 2^53).
