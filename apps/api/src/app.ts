@@ -79,7 +79,7 @@ export async function buildApp(deps: AppDeps): Promise<{ app: FastifyInstance; s
     trustProxy: true,
   });
 
-  const store = new Store(deps.db);
+  const store = new Store(deps.db, deps.music.providers.map((p) => p.info.id));
   const catalog = new Catalog(deps.music, store);
   const services: Services = {
     env,

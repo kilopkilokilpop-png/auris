@@ -24,7 +24,8 @@ export function capabilities(s: Services): CatalogCapabilities {
 }
 
 /** Curated playlists: moods via provider tags, genres via provider genre charts. */
-export const COLLECTIONS: (Collection & { kind: 'mood' | 'genre'; key: string })[] = [
+export const COLLECTIONS: (Collection & { kind: 'mood' | 'genre' | 'lang'; key: string })[] = [
+  { id: 'lang-ru', kind: 'lang', key: 'ru', title: 'Русское', subtitle: 'Песни на русском' },
   { id: 'mood-energetic', kind: 'mood', key: 'energetic', title: 'Бодрое утро', subtitle: 'Энергия с первых нот' },
   { id: 'mood-calm', kind: 'mood', key: 'calm', title: 'Спокойствие', subtitle: 'Тихо, мягко, без спешки' },
   { id: 'mood-work', kind: 'mood', key: 'work', title: 'Фокус', subtitle: 'Для работы и учёбы' },
@@ -42,7 +43,11 @@ const playableFirst = (tracks: Track[]) =>
   tracks.filter((t) => t.playback.kind !== 'none').sort((a, b) => Number(b.playback.kind === 'full') - Number(a.playback.kind === 'full'));
 
 export function registerCatalogRoutes(app: FastifyInstance, s: Services) {
-  app.get('/api/collections', async () => ({ collections: COLLECTIONS.map(({ id, title, subtitle }) => ({ id, title, subtitle })) }));
+  // Language collections only when a connected source knows lyrics language.
+  const hasLang = () => s.music.providers.some((p) => p.getLanguageTracks);
+  app.get('/api/collections', async () => ({
+    collections: COLLECTIONS.filter((c) => c.kind !== 'lang' || hasLang()).map(({ id, title, subtitle }) => ({ id, title, subtitle })),
+  }));
   app.get('/api/collections/:cid', async (req) => {
     const { cid } = z.object({ cid: z.string().max(40) }).parse(req.params);
     const c = COLLECTIONS.find((x) => x.id === cid);
@@ -50,7 +55,9 @@ export function registerCatalogRoutes(app: FastifyInstance, s: Services) {
     const raw =
       c.kind === 'mood'
         ? await s.music.getTagTracks(MOOD_KEYWORDS[c.key as keyof typeof MOOD_KEYWORDS].slice(0, 3), 30).catch(() => [])
-        : await s.music.getGenreTracks(c.key, 30).catch(() => []);
+        : c.kind === 'lang'
+          ? await s.music.getLanguageTracks(c.key, 40).catch(() => [])
+          : await s.music.getGenreTracks(c.key, 30).catch(() => []);
     const tracks = playableFirst(raw).slice(0, 30);
     void s.store.saveSnapshots(tracks).catch(() => {});
     return { id: c.id, title: c.title, subtitle: c.subtitle, tracks };

@@ -86,6 +86,10 @@ export class CompositeProvider implements MusicProvider {
   async getGenreTracks(genre: string, limit: number): Promise<Track[]> {
     return interleave(await settle(this.providers.map((p) => p.getGenreTracks(genre, limit))), limit);
   }
+  async getLanguageTracks(lang: string, limit: number): Promise<Track[]> {
+    const ps = this.providers.filter((p) => p.getLanguageTracks).map((p) => p.getLanguageTracks!(lang, limit));
+    return interleave(await settle(ps), limit);
+  }
   async getTagTracks(tags: string[], limit: number): Promise<Track[]> {
     const ps = this.providers.filter((p) => p.getTagTracks).map((p) => p.getTagTracks!(tags, limit));
     return interleave(await settle(ps), limit);

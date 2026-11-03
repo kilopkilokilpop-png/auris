@@ -79,6 +79,8 @@ export interface MusicProvider {
   getGenreTracks(genre: string, limit: number): Promise<Track[]>;
   /** Tracks matching free tags (moods), if the source supports tags. */
   getTagTracks?(tags: string[], limit: number): Promise<Track[]>;
+  /** Tracks sung in a language (ISO 639-1, e.g. "ru"), if the source knows lyrics language. */
+  getLanguageTracks?(lang: string, limit: number): Promise<Track[]>;
   /** "Выбор редакции" */
   getEditorial(): Promise<Album | null>;
 

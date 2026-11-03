@@ -17,6 +17,12 @@ export function registerHearRoutes(app: FastifyInstance, s: Services) {
     const rows = await s.store.recognitions(userId(req));
     const ids = rows.map((r) => r.trackId).filter((x): x is string => !!x);
     const snaps = await s.store.snapshots(ids);
-    return { items: rows.map(({ trackId, ...r }) => ({ ...r, track: trackId ? snaps.get(trackId) : undefined })) };
+    return {
+      items: rows.map(({ trackId, ...r }) => {
+        // A match from a source that is no longer connected: keep the title, drop the play button.
+        const track = trackId && s.music.owns(trackId) ? snaps.get(trackId) : undefined;
+        return { ...r, track, unavailableReason: trackId && !track ? 'Этого трека больше нет в каталоге AURIS.' : r.unavailableReason };
+      }),
+    };
   });
 }

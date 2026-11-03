@@ -28,7 +28,7 @@ export class WaveService {
     for (const mood of Object.keys(MOOD_KEYWORDS).concat('any')) this.pools.delete(`${userId}:${mood}`);
   }
 
-  private async pool(userId: number, profile: TasteProfile, mood: Mood, onboarding: { genres: string[]; artists: string[] }): Promise<Track[]> {
+  private async pool(userId: number, profile: TasteProfile, mood: Mood, onboarding: { genres: string[]; artists: string[] }, lang?: string): Promise<Track[]> {
     const key = `${userId}:${mood}`;
     const cached = this.pools.get(key);
     if (cached) return cached;
@@ -44,6 +44,8 @@ export class WaveService {
       ...related.slice(0, 8).map((a) => safe(this.music.getArtistTopTracks(a.id, 3))),
       ...genres.map((g) => safe(this.music.getGenreTracks(g, 15))),
       mood !== 'any' ? safe(this.music.getTagTracks(MOOD_KEYWORDS[mood].slice(0, 3), 25)) : Promise.resolve([]),
+      // Songs in the listener's Telegram language (e.g. Russian) as an extra candidate source.
+      lang ? safe(this.music.getLanguageTracks(lang, 20)) : Promise.resolve([]),
       this.store.likedIds(userId, 40).then((ids) => this.catalog.hydrate(ids)).catch(() => []),
     ]);
     const map = new Map<string, Track>();
@@ -61,7 +63,8 @@ export class WaveService {
     ]);
     const profile = buildProfile(signals);
     const onboarding = { genres: user?.onboarding_genres ?? [], artists: user?.onboarding_artists ?? [] };
-    const pool = await this.pool(userId, profile, req.mood, onboarding);
+    const lang = /^[a-z]{2}/.exec(user?.language_code ?? '')?.[0];
+    const pool = await this.pool(userId, profile, req.mood, onboarding, lang);
     const seed = `${userId}:${new Date().toISOString().slice(0, 13)}`;
     const scored = pool.map((t) => scoreTrack(t, { profile, mood: req.mood, mode: req.mode, onboarding, seed, genreNames: GENRE_NAMES_RU }));
     let picked = selectQueue(scored, profile, { count: req.count, exclude: new Set([...req.exclude, ...recent]), recentArtists: req.recentArtists });

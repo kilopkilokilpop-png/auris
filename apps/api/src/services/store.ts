@@ -17,11 +17,27 @@ interface UserRow {
   wave_mode: WaveMode;
   onboarding_genres: string[];
   onboarding_artists: string[];
+  language_code: string | null;
 }
 
 /** All SQL lives here. Every query is parameterised. */
 export class Store {
-  constructor(readonly db: Db) {}
+  /**
+   * `providers` = ids of the configured music sources. Track lists and counts only include their
+   * tracks; rows of disconnected sources stay in the DB and come back if the source returns.
+   */
+  constructor(
+    readonly db: Db,
+    private readonly providers: string[] = [],
+  ) {}
+
+  /** `AND split_part(col, ':', 1) = ANY($n)` when sources are known, else no filter. */
+  private activeSql(col: string, n: number): string {
+    return this.providers.length ? ` AND split_part(${col}, ':', 1) = ANY($${n}::text[])` : '';
+  }
+  private activeArgs(): unknown[] {
+    return this.providers.length ? [this.providers] : [];
+  }
 
   async upsertUser(u: TelegramUser): Promise<void> {
     await this.db.query(
@@ -52,7 +68,7 @@ export class Store {
   async getUserRow(id: number): Promise<UserRow | undefined> {
     const r = await this.db.query<UserRow>(
       `SELECT u.id, u.first_name, u.last_name, u.username, u.photo_url, u.is_master, u.bot_started, u.onboarded,
-              s.quality, s.wave_mood, s.wave_mode, s.onboarding_genres, s.onboarding_artists
+              s.quality, s.wave_mood, s.wave_mode, s.onboarding_genres, s.onboarding_artists, u.language_code
        FROM users u JOIN user_settings s ON s.user_id = u.id WHERE u.id=$1`,
       [id],
     );
@@ -63,7 +79,7 @@ export class Store {
     const u = await this.getUserRow(id);
     if (!u) return undefined;
     const [liked, playlists, listened] = await Promise.all([
-      this.db.query<{ n: number }>('SELECT count(*)::int AS n FROM likes WHERE user_id=$1', [id]),
+      this.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM likes WHERE user_id=$1${this.activeSql('track_id', 2)}`, [id, ...this.activeArgs()]),
       this.db.query<{ n: number }>('SELECT count(*)::int AS n FROM playlist_members WHERE user_id=$1', [id]),
       this.db.query<{ s: number | null }>('SELECT COALESCE(sum(listened_sec),0)::float8 AS s FROM events WHERE user_id=$1', [id]),
     ]);
@@ -141,8 +157,8 @@ export class Store {
   }
   async recentTrackIds(userId: number, n: number): Promise<string[]> {
     const r = await this.db.query<{ track_id: string }>(
-      `SELECT track_id FROM (SELECT track_id, max(created_at) AS t FROM events WHERE user_id=$1 AND kind IN ('play_start','play_complete','skip') GROUP BY track_id) x ORDER BY t DESC LIMIT $2`,
-      [userId, n],
+      `SELECT track_id FROM (SELECT track_id, max(created_at) AS t FROM events WHERE user_id=$1 AND kind IN ('play_start','play_complete','skip')${this.activeSql('track_id', 3)} GROUP BY track_id) x ORDER BY t DESC LIMIT $2`,
+      [userId, n, ...this.activeArgs()],
     );
     return r.rows.map((x) => x.track_id);
   }
@@ -163,7 +179,11 @@ export class Store {
     await this.db.query('DELETE FROM likes WHERE user_id=$1 AND track_id=$2', [userId, trackId]);
   }
   async likedIds(userId: number, limit = 500): Promise<string[]> {
-    const r = await this.db.query<{ track_id: string }>('SELECT track_id FROM likes WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2', [userId, limit]);
+    const r = await this.db.query<{ track_id: string }>(`SELECT track_id FROM likes WHERE user_id=$1${this.activeSql('track_id', 3)} ORDER BY created_at DESC LIMIT $2`, [
+      userId,
+      limit,
+      ...this.activeArgs(),
+    ]);
     return r.rows.map((x) => x.track_id);
   }
   async isLiked(userId: number, ids: string[]): Promise<Set<string>> {
@@ -186,12 +206,12 @@ export class Store {
   async playlists(userId: number) {
     const r = await this.db.query<{ id: number; title: string; created_at: Date | string; role: 'owner' | 'editor'; n: number; members: number; first: string | null }>(
       `SELECT p.id, p.title, p.created_at, m.role,
-              (SELECT count(*)::int FROM playlist_tracks pt WHERE pt.playlist_id = p.id) AS n,
+              (SELECT count(*)::int FROM playlist_tracks pt WHERE pt.playlist_id = p.id${this.activeSql('pt.track_id', 2)}) AS n,
               (SELECT count(*)::int FROM playlist_members pm WHERE pm.playlist_id = p.id) AS members,
-              (SELECT track_id FROM playlist_tracks WHERE playlist_id = p.id ORDER BY added_at LIMIT 1) AS first
+              (SELECT track_id FROM playlist_tracks pf WHERE pf.playlist_id = p.id${this.activeSql('pf.track_id', 2)} ORDER BY added_at LIMIT 1) AS first
        FROM playlists p JOIN playlist_members m ON m.playlist_id = p.id AND m.user_id = $1
        ORDER BY p.created_at DESC`,
-      [userId],
+      [userId, ...this.activeArgs()],
     );
     return r.rows;
   }

@@ -279,3 +279,19 @@ describe('collections', () => {
     expect((await app.inject({ method: 'GET', url: '/api/collections/nope', headers: auth() })).statusCode).toBe(404);
   });
 });
+
+describe('tracks from a disconnected source', () => {
+  it('are hidden from likes, recent and counters but kept in the database', async () => {
+    const h = auth(1201);
+    await app.inject({ method: 'GET', url: '/api/me', headers: h });
+    await app.inject({ method: 'POST', url: '/api/likes/mock:t1', headers: h });
+    await ctx.db.query(`INSERT INTO likes (user_id, track_id) VALUES (1201, 'licensed:gone1')`);
+    await ctx.db.query(`INSERT INTO events (user_id, track_id, kind) VALUES (1201, 'licensed:gone1', 'play_start')`);
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: h })).json().stats.liked).toBe(1);
+    expect((await app.inject({ method: 'GET', url: '/api/likes/ids', headers: h })).json().ids).toEqual(['mock:t1']);
+    const home = (await app.inject({ method: 'GET', url: '/api/home', headers: h })).json();
+    expect(home.recent.map((t: { id: string }) => t.id)).not.toContain('licensed:gone1');
+    const kept = await ctx.db.query(`SELECT 1 FROM likes WHERE user_id=1201 AND track_id='licensed:gone1'`);
+    expect(kept.rows).toHaveLength(1);
+  });
+});

@@ -9,7 +9,9 @@ export class Catalog {
     private readonly store: Store,
   ) {}
 
-  async hydrate(ids: string[]): Promise<Track[]> {
+  /** Tracks from providers that are no longer configured are left out (their rows stay in the DB). */
+  async hydrate(allIds: string[]): Promise<Track[]> {
+    const ids = allIds.filter((id) => this.music.owns(id));
     const snaps = await this.store.snapshots(ids);
     const out = await Promise.all(
       ids.map(async (id) => {
@@ -17,13 +19,7 @@ export class Catalog {
         return fresh ?? snaps.get(id) ?? null;
       }),
     );
-    const tracks = out
-      .filter((t): t is Track => !!t)
-      .map((t) =>
-        this.music.owns(t.id)
-          ? t
-          : { ...t, playback: { kind: 'none' as const, playableSec: 0, qualities: [], note: 'Источник этого трека больше не подключён' }, downloadable: false, downloadNote: 'Источник больше не подключён' },
-      );
+    const tracks = out.filter((t): t is Track => !!t);
     void this.store.saveSnapshots(tracks).catch(() => {});
     return tracks;
   }

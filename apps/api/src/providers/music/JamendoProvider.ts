@@ -239,6 +239,11 @@ export class JamendoProvider implements MusicProvider {
   async getTagTracks(tags: string[], limit: number) {
     return this.ranked(await this.get<JmTrack>('/tracks', this.trackParams({ fuzzytags: tags.join('+'), order: 'popularity_total', limit })));
   }
+  /** Jamendo knows the lyrics language (musicinfo.lang): this week's popular first, all-time as fallback. */
+  async getLanguageTracks(lang: string, limit: number) {
+    const week = await this.get<JmTrack>('/tracks', this.trackParams({ lang, order: 'popularity_week', limit }));
+    return this.ranked(week.length >= Math.min(10, limit) ? week : await this.get<JmTrack>('/tracks', this.trackParams({ lang, order: 'popularity_total', limit })));
+  }
   /**
    * "Выбор редакции" = Jamendo's own editorial picks (`featured=1`), exposed as a virtual album
    * `jamendo:featured`. Jamendo's top "albums" are almost all singles, so they make a poor showcase.
