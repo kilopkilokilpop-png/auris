@@ -1671,3 +1671,17 @@ html[data-vt='player-close']::view-transition-new(mini) {
   flex: 1;
   min-height: 48px;
 }
+
+.source-link {
+  display: inline-block;
+  margin-top: 4px;
+  min-height: 24px;
+  font-size: 12px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  text-decoration: none;
+}
+.source-link:active {
+  color: var(--text);
+}

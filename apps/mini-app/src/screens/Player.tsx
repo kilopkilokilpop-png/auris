@@ -8,6 +8,8 @@ import { downloadToTelegram, session, toggleLike } from '../lib/session';
 import { useStore } from '../lib/store';
 import { openSheet } from '../lib/ui';
 
+const SOURCE_NAMES: Record<string, string> = { audius: 'Audius', jamendo: 'Jamendo', deezer: 'Deezer', licensed: 'Лицензионный каталог' };
+
 export function Player() {
   const s = useStore(player.store, (x) => x);
   const track = s.queue[s.index];
@@ -44,6 +46,12 @@ export function Player() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="player-title">{track.title}</h1>
           <p className="player-artist">{track.artist.name}</p>
+          {/* Attribution: source platform + backlink to the track page (Audius / Jamendo require it). */}
+          {track.license.sourceUrl && track.provider !== 'mock' ? (
+            <a className="source-link" href={track.license.sourceUrl} target="_blank" rel="noreferrer">
+              {SOURCE_NAMES[track.provider] ?? track.provider} ↗
+            </a>
+          ) : null}
         </div>
         {s.context?.kind === 'wave' ? (
           <button type="button" className="icon-btn" aria-label="Не нравится" onClick={() => void player.dislikeCurrent()}>
