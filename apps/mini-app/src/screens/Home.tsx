@@ -61,6 +61,7 @@ export function Home() {
   const q = useQuery('home', () => api.home());
   const tier: QualityTier = profile?.settings.quality ?? 'standard';
   const tierCap = caps?.qualities.find((x) => x.tier === tier);
+  const qualityChoice = (caps?.qualities.filter((x) => x.available).length ?? 0) > 1;
   const initial = (profile?.firstName || 'A').slice(0, 1).toUpperCase();
   const editorial = q.data?.editorial;
   const badge = editorial ? albumBadge(editorial) : null;
@@ -87,6 +88,9 @@ export function Home() {
       <h1 className="h-display" style={{ marginTop: 20 }}>
         {GREETINGS[dayPart(new Date().getHours())]}
       </h1>
+      {/* Quality line and switcher only when the sources offer a real choice (no YouTube, no MP3-only catalogues). */}
+      {qualityChoice ? (
+        <>
       <p className="sub" style={{ marginTop: 6 }}>
         Качество:{' '}
         <b style={{ color: 'var(--text)', fontWeight: 800 }}>
@@ -107,6 +111,9 @@ export function Home() {
           })}
         />
       </div>
+
+        </>
+      ) : null}
 
       {q.loading && !q.data ? (
         <div className="editorial glass" aria-busy="true">
