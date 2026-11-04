@@ -8,7 +8,7 @@ export const MINI_APP_CSP = [
   "script-src 'self' https://www.youtube.com https://s.ytimg.com",
   'frame-src https://www.youtube.com https://www.youtube-nocookie.com',
   "img-src 'self' data: blob: https:",
-  "media-src 'self' blob: https:",
+  "media-src 'self' data: blob: https:",
   "connect-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",
