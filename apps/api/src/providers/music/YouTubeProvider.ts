@@ -303,13 +303,30 @@ export class YouTubeProvider implements MusicProvider {
   }
   /** chart=mostPopular in the Music category: YouTube's own chart, shown as is (1 unit). */
   async getChart(limit: number) {
-    const key = `chart|${limit}`;
+    return this.getRegionChart(this.region, limit);
+  }
+  /**
+   * YouTube's music chart of a country (RU, US, GB…), paged with pageToken (1 unit per page, max 200 videos).
+   * Availability is still checked for the listener's region (YOUTUBE_REGION).
+   */
+  async getRegionChart(regionCode: string, limit: number, page = 0): Promise<Track[]> {
+    const size = Math.min(50, Math.max(1, limit));
+    const key = `chart|${regionCode}|${size}|${page}`;
     let ids = this.lists.get(key);
     if (!ids) {
-      const r = await this.call<YtList<YtVideo>>('/videos', { part: 'snippet,contentDetails,status', chart: 'mostPopular', videoCategoryId: 10, regionCode: this.region, maxResults: Math.min(50, limit) });
-      for (const v of r.items ?? []) this.videos.set(v.id, v);
-      ids = (r.items ?? []).map((v) => v.id);
-      this.lists.set(key, ids);
+      const prev = this.pageTokens.get(`chart|${regionCode}|${size}|${page - 1}`);
+      if (page > 0 && !prev) return [];
+      try {
+        const r = await this.call<YtList<YtVideo>>('/videos', { part: 'snippet,contentDetails,status', chart: 'mostPopular', videoCategoryId: 10, regionCode, maxResults: size, pageToken: prev });
+        for (const v of r.items ?? []) this.videos.set(v.id, v);
+        ids = (r.items ?? []).map((v) => v.id);
+        if (r.nextPageToken) this.pageTokens.set(key, r.nextPageToken);
+        this.lists.set(key, ids);
+      } catch (e) {
+        const stale = e instanceof YouTubeQuotaError ? this.lists.get(key, true) : undefined;
+        if (!stale) throw e;
+        ids = stale;
+      }
     }
     const vids = await this.fetchVideos(ids);
     return ids.map((id) => vids.get(id)).filter((v): v is YtVideo => !!v && !videoUnavailable(v, this.region)).map((v) => this.toTrack(v));

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { SearchQuerySchema, TrackIdSchema, type CatalogCapabilities, type Collection, type QualityTier, type SearchSection, type Track } from '@auris/shared';
 import { MOOD_KEYWORDS } from '../reco/weights.js';
 import { isCompilation } from '../providers/music/AudiusProvider.js';
-import { YouTubeQuotaError } from '../providers/music/YouTubeProvider.js';
+import { YouTubeProvider, YouTubeQuotaError } from '../providers/music/YouTubeProvider.js';
 import { userId, type Services } from '../app.js';
 import { AppError } from '../lib/errors.js';
 
@@ -29,7 +29,11 @@ export function capabilities(s: Services): CatalogCapabilities {
 }
 
 /** Curated playlists: moods via provider tags, genres via provider genre charts. */
-export const COLLECTIONS: (Collection & { kind: 'mood' | 'genre' | 'lang' | 'query'; key: string })[] = [
+export const COLLECTIONS: (Collection & { kind: 'mood' | 'genre' | 'lang' | 'query' | 'ytchart'; key: string })[] = [
+  // YouTube's own music charts by country: a YouTube-only list (never mixed), what is popular right now.
+  { id: 'yt-ru', kind: 'ytchart', key: 'RU', title: 'Популярное в России', subtitle: 'Музыкальный чарт YouTube' },
+  { id: 'yt-us', kind: 'ytchart', key: 'US', title: 'Хиты США', subtitle: 'Музыкальный чарт YouTube' },
+  { id: 'yt-gb', kind: 'ytchart', key: 'GB', title: 'Хиты Британии', subtitle: 'Музыкальный чарт YouTube' },
   // Russian youth music: searches in both sources, keeps Cyrillic titles/artists only.
   { id: 'ru-rap', kind: 'query', key: 'рэп|трэп|фонк|русский рэп|хип-хоп|drill', title: 'Русский рэп и трэп', subtitle: 'Новые артисты' },
   { id: 'lang-ru', kind: 'lang', key: 'ru', title: 'Русское', subtitle: 'Песни на русском' },
@@ -53,8 +57,10 @@ const playableFirst = (tracks: Track[]) =>
 export function registerCatalogRoutes(app: FastifyInstance, s: Services) {
   // Language collections only when a connected source knows lyrics language.
   const hasLang = () => s.music.providers.some((p) => p.getLanguageTracks);
+  const youtube = () => s.music.separate.find((p): p is YouTubeProvider => p instanceof YouTubeProvider);
+  const offered = (c: (typeof COLLECTIONS)[number]) => (c.kind === 'lang' ? hasLang() : c.kind === 'ytchart' ? !!youtube() : true);
   app.get('/api/collections', async () => ({
-    collections: COLLECTIONS.filter((c) => c.kind !== 'lang' || hasLang()).map(({ id, title, subtitle }) => ({ id, title, subtitle })),
+    collections: COLLECTIONS.filter(offered).map(({ id, title, subtitle }) => ({ id, title, subtitle })),
   }));
   const cyrillicSearch = async (queries: string[], offset: number) => {
     const lists = await Promise.all(queries.map((q) => s.music.search(q, { type: 'track', limit: 30, offset }).then((r) => r.tracks).catch(() => [] as Track[])));
@@ -68,7 +74,17 @@ export function registerCatalogRoutes(app: FastifyInstance, s: Services) {
     const { cid } = z.object({ cid: z.string().max(40) }).parse(req.params);
     const { page } = z.object({ page: z.coerce.number().int().min(0).max(300).default(0) }).parse(req.query);
     const c = COLLECTIONS.find((x) => x.id === cid);
-    if (!c) throw new AppError('NOT_FOUND', 'Подборка не найдена', 404);
+    if (!c || !offered(c)) throw new AppError('NOT_FOUND', 'Подборка не найдена', 404);
+    if (c.kind === 'ytchart') {
+      try {
+        const tracks = await youtube()!.getRegionChart(c.key, PAGE, page);
+        void s.store.saveSnapshots(tracks).catch(() => {});
+        return { id: c.id, title: c.title, subtitle: c.subtitle, tracks, page, hasMore: tracks.length > 0 && page < 6 };
+      } catch (e) {
+        if (e instanceof YouTubeQuotaError) throw new AppError('YOUTUBE_QUOTA', 'Лимит запросов к YouTube на сегодня исчерпан. Попробуйте завтра.', 503);
+        throw e;
+      }
+    }
     // Paged: each page asks every source for its next PAGE tracks; the client scrolls on while hasMore.
     const offset = page * PAGE;
     const raw =

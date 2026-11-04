@@ -127,6 +127,14 @@ describe('YouTube (separate section, official player only)', () => {
     expect(ytItems.every((i) => !i.reasons.includes('Популярно сейчас'))).toBe(true);
     expect(ytItems.some((i) => i.track.id === 'youtube:aaaaaaaaaa2')).toBe(false); // Made for Kids
   });
+  it('YouTube country charts are YouTube-only collections', async () => {
+    const list = (await app.inject({ method: 'GET', url: '/api/collections', headers: auth() })).json().collections.map((c: { id: string }) => c.id);
+    expect(list.slice(0, 3)).toEqual(['yt-ru', 'yt-us', 'yt-gb']);
+    const ru = (await app.inject({ method: 'GET', url: '/api/collections/yt-us', headers: auth() })).json();
+    expect(ru.tracks.length).toBeGreaterThan(0);
+    expect(ru.tracks.every((t: { provider: string }) => t.provider === 'youtube')).toBe(true);
+    expect(ctx.youtube.calls.some((u) => u.includes('chart=mostPopular') && u.includes('regionCode=US'))).toBe(true);
+  });
   it('quota exhausted: readable notice, cached results still served, other sources unaffected', async () => {
     const yt = fakeYouTube();
     const c = await makeApp({ youtube: yt });
