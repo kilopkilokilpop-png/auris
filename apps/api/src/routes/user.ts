@@ -12,7 +12,14 @@ const KIDS_NOTE = 'Для видео «Сделано для детей» AURIS 
 
 export function registerUserRoutes(app: FastifyInstance, s: Services, termsOk: Set<number>) {
   app.get('/api/me', async (req) => {
-    const p = await s.store.getProfile(userId(req));
+    const id = userId(req);
+    let p = await s.store.getProfile(id);
+    if (!p && req.tgUser) {
+      // Data was erased (in the app, the bot or by an operator): start a fresh profile -> consent again.
+      termsOk.delete(id);
+      await s.store.upsertUser(req.tgUser);
+      p = await s.store.getProfile(id);
+    }
     if (!p) throw new AppError('NOT_FOUND', 'Профиль не найден', 404);
     return p;
   });

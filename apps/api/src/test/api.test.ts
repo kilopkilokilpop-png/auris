@@ -62,6 +62,11 @@ describe('terms of use & privacy policy', () => {
     const ok = await c.app.inject({ method: 'POST', url: '/api/terms/accept', headers: auth(610) });
     expect(ok.json().termsAccepted).toBe(true);
     expect((await c.app.inject({ method: 'GET', url: '/api/search?q=test', headers: auth(610) })).statusCode).toBe(200);
+    // After erasing everything the same Telegram user gets a fresh profile and is asked to consent again.
+    expect((await c.app.inject({ method: 'DELETE', url: '/api/me', headers: auth(610) })).statusCode).toBe(200);
+    const again = await c.app.inject({ method: 'GET', url: '/api/me', headers: auth(610) });
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toMatchObject({ termsAccepted: false, stats: { liked: 0 } });
     // Erasure works even without accepting (nothing is gated behind consent to delete).
     expect((await c.app.inject({ method: 'DELETE', url: '/api/me', headers: auth(611) })).statusCode).toBe(200);
     await c.app.close();
