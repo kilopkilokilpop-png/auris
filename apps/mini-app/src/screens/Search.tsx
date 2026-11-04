@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { SearchSection } from '@auris/shared';
 import { Cover } from '../components/Cover';
 import { IconBack, IconClose, IconSearch } from '../components/Icons';
 import { Empty, ErrorState, SkeletonRows } from '../components/States';
@@ -18,9 +19,70 @@ export function BackButtonInline() {
   );
 }
 
-export function Search() {
-  const [text, setText] = useState('');
-  const [q, setQ] = useState('');
+const SECTION_NOTE: Record<string, string> = {
+  youtube: 'Результаты YouTube. Видео играют в официальном плеере YouTube.',
+  jamendo: 'Независимые артисты, лицензии Creative Commons.',
+  audius: 'Независимые артисты Audius.',
+  deezer: 'Только превью 30 секунд.',
+  mock: 'Локальные демо-данные (без ключей API).',
+};
+
+function SectionView({ sec, q }: { sec: SearchSection; q: string }) {
+  const yt = sec.provider === 'youtube';
+  return (
+    <section className="section" style={{ marginTop: 24 }} aria-label={`Результаты: ${sec.name}`} data-provider={sec.provider}>
+      <div className="section-head">
+        <h2 className="h2">
+          {sec.name}
+        </h2>
+        {yt ? (
+          // Attribution must link back to YouTube (Branding Guidelines).
+          <a className="source-link" href={`https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`} target="_blank" rel="noopener">
+            Открыть на YouTube ↗
+          </a>
+        ) : null}
+      </div>
+      <p className="note" style={{ margin: '0 0 6px' }}>
+        {SECTION_NOTE[sec.provider] ?? ''}
+      </p>
+      {sec.notice ? <p className="notice">{sec.notice}</p> : null}
+      {!sec.notice && !sec.tracks.length && !sec.artists.length && !sec.albums.length ? <p className="muted" style={{ fontSize: 14 }}>Ничего не нашлось.</p> : null}
+      {sec.artists.length ? (
+        <div className="hscroll" style={{ marginBottom: 8 }}>
+          {sec.artists.map((a) => (
+            <button key={a.id} type="button" className="tile" onClick={() => go.push({ name: 'artist', id: a.id })}>
+              <Cover src={a.pictureUrl} className="round" />
+              <span className="row-title" style={{ display: 'block', textAlign: 'center' }}>
+                {a.name}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {sec.tracks.length ? <TrackList tracks={sec.tracks} context={`${sec.name}: ${q}`} showSource={false} /> : null}
+      {sec.albums.length ? (
+        <div className="hscroll" style={{ marginTop: 12 }}>
+          {sec.albums.map((a) => (
+            <button key={a.id} type="button" className="tile" onClick={() => go.push({ name: 'album', id: a.id })}>
+              <Cover src={a.coverUrl} />
+              <span className="row-title" style={{ display: 'block' }}>
+                {a.title}
+              </span>
+              <span className="row-sub" style={{ display: 'block' }}>
+                {a.artist.name}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export function Search({ initialQ, source }: { initialQ?: string; source?: 'youtube' } = {}) {
+  const [text, setText] = useState(initialQ ?? '');
+  const [q, setQ] = useState(initialQ ?? '');
+  const [only, setOnly] = useState<string | null>(source ?? null);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const t = setTimeout(() => setQ(text.trim()), 350);
@@ -29,7 +91,7 @@ export function Search() {
   const res = useQuery(q ? `s:${q}` : null, () => api.search(q));
   const recent = useQuery(q ? null : 'recent', () => api.recentSearches());
   const charts = useQuery('charts', () => api.charts());
-  const empty = res.data && !res.data.tracks.length && !res.data.albums.length && !res.data.artists.length;
+  const empty = res.data && res.data.sections.every((x) => !x.tracks.length && !x.albums.length && !x.artists.length && !x.notice);
 
   return (
     <main className="screen overlay" aria-label="Поиск">
@@ -117,51 +179,18 @@ export function Search() {
               <Empty title="Ничего не нашлось">Проверьте написание или попробуйте имя артиста.</Empty>
             </div>
           ) : null}
-          {res.data?.artists.length ? (
-            <section className="section" style={{ marginTop: 24 }} aria-label="Артисты">
-              <h2 className="h2" style={{ marginBottom: 12 }}>
-                Артисты
-              </h2>
-              <div className="hscroll">
-                {res.data.artists.map((a) => (
-                  <button key={a.id} type="button" className="tile" onClick={() => go.push({ name: 'artist', id: a.id })}>
-                    <Cover src={a.pictureUrl} className="round" />
-                    <span className="row-title" style={{ display: 'block', textAlign: 'center' }}>
-                      {a.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
+          {res.data && res.data.sections.length > 1 ? (
+            <div className="chips" role="group" aria-label="Источник" style={{ marginTop: 16 }}>
+              {[{ provider: null as string | null, name: 'Все' }, ...res.data.sections].map((x) => (
+                <button key={x.provider ?? 'all'} type="button" className="chip" aria-pressed={only === x.provider} onClick={() => setOnly(x.provider)}>
+                  {x.name}
+                </button>
+              ))}
+            </div>
           ) : null}
-          {res.data?.tracks.length ? (
-            <section className="section" style={{ marginTop: 24 }} aria-label="Треки">
-              <h2 className="h2" style={{ marginBottom: 4 }}>
-                Треки
-              </h2>
-              <TrackList tracks={res.data.tracks} context={`Поиск: ${q}`} />
-            </section>
-          ) : null}
-          {res.data?.albums.length ? (
-            <section className="section" aria-label="Альбомы">
-              <h2 className="h2" style={{ marginBottom: 12 }}>
-                Альбомы
-              </h2>
-              <div className="hscroll">
-                {res.data.albums.map((a) => (
-                  <button key={a.id} type="button" className="tile" onClick={() => go.push({ name: 'album', id: a.id })}>
-                    <Cover src={a.coverUrl} />
-                    <span className="row-title" style={{ display: 'block' }}>
-                      {a.title}
-                    </span>
-                    <span className="row-sub" style={{ display: 'block' }}>
-                      {a.artist.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ) : null}
+          {res.data?.sections
+            .filter((x) => !only || x.provider === only)
+            .map((x) => <SectionView key={x.provider} sec={x} q={q} />)}
         </>
       )}
     </main>

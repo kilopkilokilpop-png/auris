@@ -23,6 +23,10 @@ export function registerInternalRoutes(app: FastifyInstance, s: Services) {
     if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) throw new AppError('UNAUTHORIZED', 'forbidden', 403);
   };
 
+  const requireTerms = async (uid: number) => {
+    if (!(await s.store.termsAccepted(uid))) throw new AppError('TERMS_REQUIRED', 'Сначала примите условия: /start', 403);
+  };
+
   app.register(async (r) => {
     r.addHook('onRequest', guard);
 
@@ -34,8 +38,20 @@ export function registerInternalRoutes(app: FastifyInstance, s: Services) {
       return { ok: true };
     });
 
+    // Bot side of the consent flow (/start shows the terms with an "I accept" button).
+    r.get('/internal/terms', async (req) => {
+      const { userId } = z.object({ userId: z.coerce.number().int().positive() }).parse(req.query);
+      return { accepted: await s.store.termsAccepted(userId) };
+    });
+    r.post('/internal/terms/accept', async (req) => {
+      const { userId } = UserBody.parse(req.body);
+      await s.store.acceptTerms(userId);
+      return { ok: true };
+    });
+
     r.get('/internal/search', async (req) => {
       const q = z.object({ q: z.string().trim().min(1).max(120), userId: z.coerce.number().int().positive() }).parse(req.query);
+      await requireTerms(q.userId);
       const res = await s.music.search(q.q, { type: 'track', limit: 6 });
       await s.store.saveSnapshots(res.tracks);
       return { tracks: res.tracks };
@@ -43,24 +59,20 @@ export function registerInternalRoutes(app: FastifyInstance, s: Services) {
 
     r.get('/internal/likes', async (req) => {
       const { userId } = z.object({ userId: z.coerce.number().int().positive() }).parse(req.query);
+      await requireTerms(userId);
       return { tracks: await s.catalog.hydrate(await s.store.likedIds(userId, 10)) };
     });
 
     r.post('/internal/likes', async (req) => {
       const b = UserBody.extend({ trackId: TrackIdSchema }).parse(req.body);
+      await requireTerms(b.userId);
       const [t] = await s.catalog.hydrate([b.trackId]);
       if (!t) throw new AppError('NOT_FOUND', 'Трек не найден', 404);
+      if (t.youtube?.madeForKids) throw new AppError('BAD_REQUEST', 'Для детских видео AURIS не сохраняет действия', 400);
       await s.store.like(b.userId, b.trackId);
       await s.store.addEvent(b.userId, { trackId: b.trackId, kind: 'like', artistId: t.artist.id, genres: t.genres, context: 'bot' });
       s.wave.invalidate(b.userId);
       return { ok: true };
-    });
-
-    r.post('/internal/download', async (req) => {
-      const b = UserBody.extend({ trackId: TrackIdSchema }).parse(req.body);
-      const t = await s.music.getTrack(b.trackId);
-      if (!t) throw new AppError('NOT_FOUND', 'Трек не найден', 404);
-      return s.downloads.send(b.userId, t);
     });
 
     r.post('/internal/recognize', async (req) => {
@@ -68,6 +80,7 @@ export function registerInternalRoutes(app: FastifyInstance, s: Services) {
       if (!file) throw new AppError('AUDIO_INVALID', 'Нет аудио', 400);
       const uid = Number((file.fields.userId as { value?: string } | undefined)?.value);
       if (!Number.isInteger(uid) || uid <= 0) throw new AppError('BAD_REQUEST', 'userId', 400);
+      await requireTerms(uid);
       return s.recognition.recognize(uid, await file.toBuffer(), file.mimetype, 'bot');
     });
 

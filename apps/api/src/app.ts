@@ -11,19 +11,15 @@ import { AppError } from './lib/errors.js';
 import type { CompositeProvider } from './providers/music/registry.js';
 import type { RecognitionProvider } from './providers/recognition/RecognitionProvider.js';
 import { Catalog } from './services/catalog.js';
-import { MockProvider } from './providers/music/MockProvider.js';
-import { DownloadService } from './services/downloads.js';
 import { RecognitionService } from './services/recognition.js';
 import { Store } from './services/store.js';
 import { StreamSigner } from './services/streamToken.js';
-import type { TelegramSender } from './services/telegram.js';
 import { WaveService } from './services/wave.js';
 import { registerUserRoutes } from './routes/user.js';
 import { registerCatalogRoutes } from './routes/catalog.js';
 import { registerMediaRoutes } from './routes/media.js';
 import { registerWaveRoutes } from './routes/wave.js';
 import { registerHearRoutes } from './routes/hear.js';
-import { registerDownloadRoutes } from './routes/downloads.js';
 import { registerInternalRoutes } from './routes/internal.js';
 import { registerDevRoutes, DEV_BOT_TOKEN } from './routes/dev.js';
 
@@ -38,7 +34,6 @@ export interface AppDeps {
   db: Db;
   music: CompositeProvider;
   recognition: RecognitionProvider;
-  sender: TelegramSender | null;
   hasFfmpeg: boolean;
 }
 
@@ -49,10 +44,11 @@ export interface Services {
   catalog: Catalog;
   wave: WaveService;
   signer: StreamSigner;
-  downloads: DownloadService;
   recognition: RecognitionService;
 }
 
+/** Reachable before the terms are accepted: read own profile, accept, or erase everything. */
+const TERMS_FREE = new Set(['GET /api/me', 'POST /api/terms/accept', 'DELETE /api/me']);
 const PUBLIC_PREFIXES = ['/api/health', '/api/public-config', '/api/stream/', '/api/media/', '/api/dev/', '/internal/'];
 
 export function userId(req: FastifyRequest): number {
@@ -88,20 +84,6 @@ export async function buildApp(deps: AppDeps): Promise<{ app: FastifyInstance; s
     catalog,
     wave: new WaveService(deps.music, store, catalog),
     signer: new StreamSigner(env.STREAM_SIGNING_SECRET),
-    downloads: new DownloadService({
-      music: deps.music,
-      store,
-      sender: deps.sender,
-      botUsername: env.BOT_USERNAME,
-      perDay: env.DOWNLOADS_PER_DAY,
-      concurrency: env.DOWNLOAD_CONCURRENCY,
-      ffmpeg: env.FFMPEG_PATH,
-      localCover: async (url) => {
-        const m = /^\/api\/media\/cover\/(.+)$/.exec(url);
-        const p = m ? deps.music.byId(decodeURIComponent(m[1]!)) : undefined;
-        return p instanceof MockProvider ? p.coverFile(decodeURIComponent(m![1]!), 'jpg') : null;
-      },
-    }),
     recognition: new RecognitionService({
       provider: deps.recognition,
       music: deps.music,
@@ -110,6 +92,7 @@ export async function buildApp(deps: AppDeps): Promise<{ app: FastifyInstance; s
       hasFfmpeg: deps.hasFfmpeg,
       perDay: env.RECOGNITION_PER_DAY,
       perMinute: env.RECOGNITION_PER_MINUTE,
+      dailyBudget: env.RECOGNITION_DAILY_BUDGET,
     }),
   };
 
@@ -147,6 +130,7 @@ export async function buildApp(deps: AppDeps): Promise<{ app: FastifyInstance; s
 
   const verifyToken = env.BOT_TOKEN ?? (env.ALLOW_DEV_AUTH ? DEV_BOT_TOKEN : undefined);
   const seen = new Map<number, number>();
+  const termsOk = new Set<number>();
   app.decorateRequest('tgUser', null);
   app.addHook('onRequest', async (req) => {
     const url = req.url;
@@ -164,6 +148,13 @@ export async function buildApp(deps: AppDeps): Promise<{ app: FastifyInstance; s
     if (Date.now() - last > 10 * 60_000) {
       await store.upsertUser(req.tgUser);
       seen.set(req.tgUser.id, Date.now());
+    }
+    // Every feature requires accepted terms + privacy policy (YouTube Developer Policies III.A.1-2).
+    const path = url.split('?')[0]!;
+    if (TERMS_FREE.has(`${req.method} ${path}`) || path === '/api/public-config') return;
+    if (!termsOk.has(req.tgUser.id)) {
+      if (!(await store.termsAccepted(req.tgUser.id))) throw new AppError('TERMS_REQUIRED', 'Примите условия использования и политику конфиденциальности', 403);
+      termsOk.add(req.tgUser.id);
     }
   });
 
@@ -200,12 +191,11 @@ export async function buildApp(deps: AppDeps): Promise<{ app: FastifyInstance; s
   // Public, non-secret runtime config for the Mini App (so the bundle needs no build-time vars).
   app.get('/api/public-config', async () => ({ botUsername: env.BOT_USERNAME ?? null }));
 
-  registerUserRoutes(app, services);
+  registerUserRoutes(app, services, termsOk);
   registerCatalogRoutes(app, services);
   registerMediaRoutes(app, services);
   registerWaveRoutes(app, services);
   registerHearRoutes(app, services);
-  registerDownloadRoutes(app, services);
   registerInternalRoutes(app, services);
   if (env.ALLOW_DEV_AUTH && env.NODE_ENV !== 'production') registerDevRoutes(app, services);
 

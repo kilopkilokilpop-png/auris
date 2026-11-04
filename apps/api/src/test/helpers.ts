@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildApp } from '../app.js';
@@ -12,8 +11,7 @@ import { MockMedia } from '../providers/music/mock-media.js';
 import { MockProvider } from '../providers/music/MockProvider.js';
 import { CompositeProvider } from '../providers/music/registry.js';
 import { MockRecognition } from '../providers/recognition/MockRecognition.js';
-import type { AudioInput, AudioMeta, TelegramSender } from '../services/telegram.js';
-import { TelegramSendError } from '../services/telegram.js';
+import { YouTubeProvider, type YtFetch, type YtVideo } from '../providers/music/YouTubeProvider.js';
 
 export const TEST_TOKEN = '777:test-bot-token';
 export const MEDIA_DIR = path.join(os.tmpdir(), 'auris-test-media');
@@ -29,15 +27,38 @@ async function freshPostgres(adminUrl: string): Promise<Db> {
   return createPostgresDb(u.toString());
 }
 
-export class FakeSender implements TelegramSender {
-  calls: { chatId: number; input: AudioInput; meta: AudioMeta; size?: number }[] = [];
-  notStarted = new Set<number>();
-  async sendAudio(chatId: number, input: AudioInput, meta: AudioMeta) {
-    if (this.notStarted.has(chatId)) throw new TelegramSendError('not_started', 'Forbidden: bot can\'t initiate conversation with a user');
-    const size = 'path' in input ? fs.statSync(input.path).size : undefined;
-    this.calls.push({ chatId, input, meta, size });
-    return { fileId: `FILE_${this.calls.length}` };
-  }
+/** Canned YouTube Data API: real-looking ids, no network. `calls` records every request URL. */
+export function fakeYouTube(over: Partial<Record<string, Partial<YtVideo>>> = {}) {
+  const v = (id: string, title: string, extra: Partial<YtVideo> = {}): YtVideo => ({
+    id,
+    snippet: { title, channelId: 'UCaaaaaaaaaaaaaaaaaaaaaa', channelTitle: 'Канал Артиста', thumbnails: { high: { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg` } }, liveBroadcastContent: 'none' },
+    contentDetails: { duration: 'PT3M33S' },
+    status: { uploadStatus: 'processed', privacyStatus: 'public', embeddable: true, madeForKids: false },
+    ...extra,
+    ...over[id],
+  });
+  const videos: Record<string, YtVideo> = {
+    aaaaaaaaaa1: v('aaaaaaaaaa1', 'Песня &amp; Клип (Official Video)'),
+    aaaaaaaaaa2: v('aaaaaaaaaa2', 'Колыбельная', { status: { uploadStatus: 'processed', privacyStatus: 'public', embeddable: true, madeForKids: true } }),
+    aaaaaaaaaa3: v('aaaaaaaaaa3', 'Не встраивается', { status: { uploadStatus: 'processed', privacyStatus: 'public', embeddable: false, madeForKids: false } }),
+  };
+  const calls: string[] = [];
+  let quotaOut = false;
+  const fetcher: YtFetch = async (url) => {
+    calls.push(url);
+    if (quotaOut) return { status: 403, body: { error: { errors: [{ reason: 'quotaExceeded' }] } } };
+    const u = new URL(url);
+    if (u.pathname.endsWith('/search')) return { status: 200, body: { items: Object.keys(videos).map((id) => ({ id: { kind: 'youtube#video', videoId: id } })) } };
+    if (u.pathname.endsWith('/videos')) {
+      if (u.searchParams.get('chart')) return { status: 200, body: { items: [videos.aaaaaaaaaa1] } };
+      const ids = (u.searchParams.get('id') ?? '').split(',');
+      return { status: 200, body: { items: ids.map((id) => videos[id]).filter(Boolean) } };
+    }
+    if (u.pathname.endsWith('/channels')) return { status: 200, body: { items: [{ id: 'UCaaaaaaaaaaaaaaaaaaaaaa', snippet: { title: 'Канал Артиста' } }] } };
+    return { status: 404, body: {} };
+  };
+  const provider = new YouTubeProvider('YT-SECRET-KEY', 'RU', 29, fetcher);
+  return { provider, calls, videos, setQuotaOut: (v: boolean) => (quotaOut = v) };
 }
 
 /** Deezer adapter with a canned upstream — no network in tests. */
@@ -57,7 +78,7 @@ export function fakeDeezer() {
   return new DeezerProvider(fetcher);
 }
 
-export async function makeApp(opts: { db?: Db; env?: Partial<Record<string, string>>; sender?: FakeSender } = {}) {
+export async function makeApp(opts: { db?: Db; env?: Partial<Record<string, string>>; terms?: boolean; youtube?: ReturnType<typeof fakeYouTube> } = {}) {
   const env: Env = parseEnv({
     NODE_ENV: 'test',
     BOT_TOKEN: TEST_TOKEN,
@@ -70,11 +91,13 @@ export async function makeApp(opts: { db?: Db; env?: Partial<Record<string, stri
   const db = opts.db ?? (process.env.TEST_DATABASE_URL ? await freshPostgres(process.env.TEST_DATABASE_URL) : await createPgliteDb());
   await migrate(db, MIGRATIONS_DIR);
   const mock = new MockProvider(new MockMedia(MEDIA_DIR, 'ffmpeg'));
-  const music = new CompositeProvider([mock, fakeDeezer()]);
-  const sender = opts.sender ?? new FakeSender();
-  const { app, services } = await buildApp({ env, db, music, recognition: new MockRecognition(), sender, hasFfmpeg: true });
+  const youtube = opts.youtube ?? fakeYouTube();
+  const music = new CompositeProvider([mock, youtube.provider, fakeDeezer()]);
+  const { app, services } = await buildApp({ env, db, music, recognition: new MockRecognition(), hasFfmpeg: true });
+  // Most suites test features, not consent: pre-accept unless the suite asks otherwise.
+  if (opts.terms !== false) services.store.termsAccepted = async () => true;
   await app.ready();
-  return { app, services, db, sender, env };
+  return { app, services, db, env, youtube };
 }
 
 export function auth(userId = 501, first = 'Тест') {

@@ -15,8 +15,8 @@ export const ErrorCodeSchema = z.enum([
   'UNAUTHORIZED',
   'NOT_FOUND',
   'RATE_LIMITED',
-  'DOWNLOAD_FORBIDDEN',
-  'DOWNLOAD_QUOTA',
+  'TERMS_REQUIRED',
+  'YOUTUBE_QUOTA',
   'FILE_TOO_LARGE',
   'BOT_NOT_STARTED',
   'BOT_NOT_CONFIGURED',
@@ -89,6 +89,20 @@ export const SearchResponseSchema = z.object({
   artists: z.array(ArtistSchema),
   albums: z.array(AlbumSchema),
 });
+/**
+ * Search is grouped by source: YouTube results are never mixed with other catalogues
+ * (YouTube API Developer Policies III.C.5). `notice` explains a missing section (quota, no key).
+ */
+export const SearchSectionSchema = z.object({
+  provider: z.string(),
+  name: z.string(),
+  tracks: z.array(TrackSchema),
+  artists: z.array(ArtistSchema),
+  albums: z.array(AlbumSchema),
+  notice: z.string().optional(),
+});
+export const SearchSectionsResponseSchema = z.object({ sections: z.array(SearchSectionSchema) });
+export type SearchSection = z.infer<typeof SearchSectionSchema>;
 export type SearchResponse = z.infer<typeof SearchResponseSchema>;
 
 export const SettingsPatchSchema = z
@@ -117,19 +131,11 @@ export const StreamInfoSchema = z.object({
 });
 export type StreamInfo = z.infer<typeof StreamInfoSchema>;
 
-export const DownloadDecisionSchema = z.object({
-  allowed: z.boolean(),
-  reason: z.string().optional(),
-});
-export type DownloadDecisionDto = z.infer<typeof DownloadDecisionSchema>;
-
 export const PlaylistCreateSchema = z.object({ title: z.string().trim().min(1).max(64) });
 export const PlaylistAddSchema = z.object({ trackId: TrackIdSchema });
 export const PlaylistJoinSchema = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/) });
 
 /** Max recognition upload, bytes. ~10s of any browser codec is far below this. */
 export const RECOGNITION_MAX_BYTES = 3 * 1024 * 1024;
-/** Telegram Bot API: bots can send audio files up to 50 MB (sendAudio, checked 2026-11). */
-export const TELEGRAM_SEND_MAX_BYTES = 50 * 1024 * 1024;
 /** Telegram Bot API: getFile can download files up to 20 MB. */
 export const TELEGRAM_GETFILE_MAX_BYTES = 20 * 1024 * 1024;

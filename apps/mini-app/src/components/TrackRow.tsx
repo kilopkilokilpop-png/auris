@@ -10,7 +10,9 @@ import { IconClose, IconHeart, IconMore } from './Icons';
 
 export type RowTrailing = 'badge' | 'heart' | 'more';
 
-export function TrackRow({ track, onPlay, trailing = 'more', sub, onRemove }: { track: Track; onPlay: () => void; trailing?: RowTrailing; sub?: string; onRemove?: () => void }) {
+const SOURCE_SHORT: Partial<Record<Track['provider'], string>> = { youtube: 'YouTube', jamendo: 'Jamendo', audius: 'Audius', deezer: 'Deezer' };
+
+export function TrackRow({ track, onPlay, trailing = 'more', sub, onRemove, showSource }: { track: Track; onPlay: () => void; trailing?: RowTrailing; sub?: string; onRemove?: () => void; showSource?: boolean }) {
   const tier = useStore(session, (s) => s.profile?.settings.quality ?? 'standard');
   const liked = useStore(session, (s) => s.liked.has(track.id));
   const current = useStore(player.store, (s) => s.queue[s.index]?.id === track.id);
@@ -29,6 +31,7 @@ export function TrackRow({ track, onPlay, trailing = 'more', sub, onRemove }: { 
         <span className="row-text">
           <span className="row-title">{track.title}</span>
           <span className="row-sub" style={{ display: 'block' }}>
+            {showSource && SOURCE_SHORT[track.provider] ? <span className="source-badge">{SOURCE_SHORT[track.provider]}</span> : null}
             {sub ?? track.artist.name}
           </span>
         </span>
@@ -56,7 +59,7 @@ export function TrackRow({ track, onPlay, trailing = 'more', sub, onRemove }: { 
   );
 }
 
-export function TrackList({ tracks, context, trailing, sub, onRemove }: { tracks: Track[]; context: string; trailing?: RowTrailing; sub?: (t: Track) => string | undefined; onRemove?: (t: Track) => (() => void) | undefined }) {
+export function TrackList({ tracks, context, trailing, sub, onRemove, showSource = true }: { tracks: Track[]; context: string; trailing?: RowTrailing; sub?: (t: Track) => string | undefined; onRemove?: (t: Track) => (() => void) | undefined; showSource?: boolean }) {
   return (
     <ul className="list">
       {tracks.map((t, i) => (
@@ -66,6 +69,7 @@ export function TrackList({ tracks, context, trailing, sub, onRemove }: { tracks
           trailing={trailing}
           sub={sub?.(t)}
           onRemove={onRemove?.(t)}
+          showSource={showSource}
           onPlay={() => (t.playback.kind === 'none' ? openSheet({ kind: 'info', title: 'Нельзя послушать', body: t.playback.note ?? 'Источник не даёт воспроизвести этот трек.' }) : player.playList(tracks, i, { label: context, kind: 'list' }))}
         />
       ))}

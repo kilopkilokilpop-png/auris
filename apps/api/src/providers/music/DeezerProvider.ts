@@ -1,7 +1,7 @@
 import type { Album, Artist, Genre, QualityTier, Track } from '@auris/shared';
 import { fetchJson, OutboundLimiter, TtlCache, UpstreamError } from '../../lib/http.js';
 import { DEEZER_GENRES, GENRE_NAMES_RU } from './genres.js';
-import { stripPrefix, type DownloadDecision, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
+import { stripPrefix, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
 
 /**
  * Deezer Simple API (https://developers.deezer.com/api).
@@ -26,7 +26,6 @@ export class DeezerProvider implements MusicProvider {
     name: 'Deezer',
     fullStreams: false,
     previewsOnly: true,
-    downloads: false,
     notice: 'Deezer: только 30-секундные превью и метаданные, для личного некоммерческого использования. Полные треки и скачивание недоступны.',
     maxTier: 'standard',
     tiers: { standard: 'превью MP3 128 кбит/с' },
@@ -77,8 +76,6 @@ export class DeezerProvider implements MusicProvider {
           }
         : { kind: 'none', playableSec: 0, qualities: [], note: 'Превью этого трека недоступно в вашем регионе' },
       license: { name: 'Deezer API — личное некоммерческое использование', sourceUrl: t.link ?? `https://www.deezer.com/track/${t.id}` },
-      downloadable: false,
-      downloadNote: 'Deezer не разрешает скачивание',
     };
   }
   private toArtist(a: DzArtist): Artist {
@@ -175,11 +172,6 @@ export class DeezerProvider implements MusicProvider {
     const t = await this.get<DzTrack>(`/track/${encodeURIComponent(stripPrefix(id, P))}`).catch(() => null);
     if (!t?.preview || t.readable === false) return null;
     return { url: t.preview, mime: 'audio/mpeg', kind: 'preview', playableSec: Math.min(PREVIEW_SEC, t.duration), tier: 'standard' };
-  }
-
-  async getDownload(_id: string): Promise<DownloadDecision> {
-    void _id;
-    return { allowed: false, code: 'provider_forbids', reason: 'Условия Deezer API запрещают скачивание треков' };
   }
 
   async match(hint: RecognizedHint) {

@@ -13,10 +13,10 @@ export class ApiCallError extends Error {
 /** The bot never touches the DB or providers directly — it calls the API's internal routes. */
 export interface AurisApi {
   touchUser(user: { id: number; first_name?: string; last_name?: string; username?: string }, botStarted: boolean): Promise<void>;
-  search(userId: number, q: string): Promise<Track[]>;
   liked(userId: number): Promise<Track[]>;
   like(userId: number, trackId: string): Promise<void>;
-  download(userId: number, trackId: string): Promise<{ status: 'sent' }>;
+  termsAccepted(userId: number): Promise<boolean>;
+  acceptTerms(userId: number): Promise<void>;
   recognize(userId: number, audio: Buffer, mime: string, filename: string): Promise<Recognition>;
   resetRecommendations(userId: number): Promise<void>;
   deleteUser(userId: number): Promise<void>;
@@ -44,17 +44,17 @@ export class HttpAurisApi implements AurisApi {
   async touchUser(user: { id: number; first_name?: string; last_name?: string; username?: string }, botStarted: boolean) {
     await this.call('POST', '/internal/users/touch', { user, botStarted });
   }
-  async search(userId: number, q: string) {
-    return (await this.call<{ tracks: Track[] }>('GET', `/internal/search?userId=${userId}&q=${encodeURIComponent(q)}`)).tracks;
-  }
   async liked(userId: number) {
     return (await this.call<{ tracks: Track[] }>('GET', `/internal/likes?userId=${userId}`)).tracks;
   }
   async like(userId: number, trackId: string) {
     await this.call('POST', '/internal/likes', { userId, trackId });
   }
-  async download(userId: number, trackId: string) {
-    return this.call<{ status: 'sent' }>('POST', '/internal/download', { userId, trackId });
+  async termsAccepted(userId: number) {
+    return (await this.call<{ accepted: boolean }>('GET', `/internal/terms?userId=${userId}`)).accepted;
+  }
+  async acceptTerms(userId: number) {
+    await this.call('POST', '/internal/terms/accept', { userId });
   }
   async recognize(userId: number, audio: Buffer, mime: string, filename: string) {
     const form = new FormData();

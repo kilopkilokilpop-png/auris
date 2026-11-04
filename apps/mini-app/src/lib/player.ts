@@ -30,6 +30,19 @@ export interface PlayerState {
   volume: number;
   /** iOS WebViews ignore HTMLMediaElement.volume: only the hardware buttons change it. */
   volumeSupported: boolean;
+  /**
+   * Current track plays in the official YouTube IFrame player (rendered by the Player screen).
+   * There is no audio element for it, no mini-player and no background playback.
+   */
+  embed: boolean;
+  /** The user (or the wave they switched on) asked the embed to start; the embed still checks visibility. */
+  embedWantsPlay: number;
+}
+
+/** What the visible YouTube player exposes to the global player (official IFrame API calls only). */
+export interface EmbedController {
+  play(): void;
+  pause(): void;
 }
 
 const initial: PlayerState = {
@@ -50,6 +63,8 @@ const initial: PlayerState = {
   expanded: false,
   volume: 1,
   volumeSupported: true,
+  embed: false,
+  embedWantsPlay: 0,
 };
 
 const VOLUME_KEY = 'auris.volume';
@@ -81,6 +96,8 @@ class Player {
   private loadSeq = 0;
   private waveLoading = false;
   private history: string[] = [];
+  private embedCtl: EmbedController | null = null;
+  private embedStarted = new Set<string>();
 
   constructor() {
     this.audio = typeof Audio !== 'undefined' ? new Audio() : ({} as HTMLAudioElement);
@@ -250,6 +267,19 @@ class Player {
     const seq = ++this.loadSeq;
     this.listened = 0;
     this.lastTime = seekTo;
+    if (track.playback.kind === 'embed') {
+      // YouTube: stop our audio, show the official player. It starts only while visible (> 50 %).
+      this.audio.pause();
+      if (this.audio.src && this.audio.src !== SILENCE) this.audio.src = SILENCE;
+      this.store.set({
+        index, embed: true, expanded: true, loading: false, error: null, position: 0, duration: track.playback.playableSec, buffered: 0,
+        streamKind: null, qualityLine: '', playing: false, embedWantsPlay: autoplay ? Date.now() : 0,
+      });
+      this.clearMetadata();
+      void this.extendWave();
+      return;
+    }
+    this.store.set({ embed: false });
     this.store.set({ index, loading: true, error: null, position: seekTo, duration: track.playback.playableSec, buffered: 0, streamKind: track.playback.kind === 'none' ? null : track.playback.kind });
     this.setMetadata(track);
     try {
@@ -277,6 +307,15 @@ class Player {
   /** Reports how the current track ended for recommendations. */
   private finishCurrent(how: 'skip' | 'complete') {
     const t = this.current;
+    if (t && this.state.embed) {
+      const pos = this.state.position;
+      if (!t.youtube?.madeForKids) {
+        if (how === 'complete') void api.event(t.id, 'play_complete', { listenedSec: Math.round(this.listened), positionSec: pos });
+        else if (pos > 1) void api.event(t.id, 'skip', { positionSec: Math.round(pos), listenedSec: Math.round(this.listened) });
+      }
+      this.listened = 0;
+      return;
+    }
     if (!t || this.audio.src === SILENCE || !this.audio.src) return;
     const pos = this.audio.currentTime || 0;
     if (how === 'complete') void api.event(t.id, 'play_complete', { listenedSec: Math.round(this.listened), positionSec: pos });
@@ -314,6 +353,14 @@ class Player {
       }
     }
     if (i < 0) i = 0;
+    // Collapsed (mini-player): YouTube tracks cannot play without their visible player -> skip over them.
+    if (!s.expanded) {
+      while (s.queue[i]?.playback.kind === 'embed' && i + dir >= 0 && i + dir < s.queue.length) i += dir;
+      if (s.queue[i]?.playback.kind === 'embed') {
+        this.store.set({ playing: false });
+        return;
+      }
+    }
     if (user) tg.haptic.select();
     void this.load(i, true);
   }
@@ -321,6 +368,18 @@ class Player {
   toggle() {
     if (!this.current) return;
     tg.haptic.tap();
+    if (this.state.embed) {
+      // Only while the official player is on screen; it is never controlled from the background.
+      if (!this.state.expanded) {
+        // Collapsed YouTube track: playing means opening its visible player.
+        this.store.set({ expanded: true, embedWantsPlay: Date.now() });
+        return;
+      }
+      if (!this.embedCtl || document.visibilityState !== 'visible') return;
+      if (this.state.playing) this.embedCtl.pause();
+      else this.embedCtl.play();
+      return;
+    }
     if (this.audio.paused) {
       if (!this.audio.src || this.audio.src === SILENCE || this.state.error) {
         this.unlock();
@@ -335,7 +394,7 @@ class Player {
   }
   prev() {
     this.unlock();
-    if (this.audio.currentTime > 3) {
+    if (!this.state.embed && this.audio.currentTime > 3) {
       this.audio.currentTime = 0;
       if (this.current) void api.event(this.current.id, 'repeat');
       return;
@@ -343,7 +402,7 @@ class Player {
     this.advance(-1, true);
   }
   seek(sec: number) {
-    if (!Number.isFinite(sec)) return;
+    if (!Number.isFinite(sec) || this.state.embed) return;
     this.audio.currentTime = Math.max(0, Math.min(sec, this.state.duration || sec));
     this.store.set({ position: this.audio.currentTime });
   }
@@ -365,7 +424,43 @@ class Player {
     void this.refreshWave();
   }
   expand(v: boolean) {
+    // Leaving the player screen with a YouTube track: playback stops (no mini-player, no background play).
+    if (!v && this.state.embed) {
+      this.embedCtl?.pause();
+      this.store.set({ expanded: false, playing: false, embedWantsPlay: 0 });
+      return;
+    }
     this.store.set({ expanded: v });
+  }
+
+  // ---------- YouTube embed bridge (called by the visible player component) ----------
+  attachEmbed(ctl: EmbedController | null) {
+    this.embedCtl = ctl;
+  }
+  onEmbedState(state: 'playing' | 'paused' | 'buffering' | 'ended', pos: number, duration: number) {
+    const t = this.current;
+    if (!t || !this.state.embed) return;
+    const d = pos - this.lastTime;
+    if (state === 'playing' && d > 0 && d < 2) this.listened += d;
+    this.lastTime = pos;
+    this.store.set({ position: pos, duration: duration || this.state.duration, playing: state === 'playing' || state === 'buffering', loading: state === 'buffering' });
+    if (state === 'playing') {
+      const key = `${t.id}:${this.state.index}`;
+      if (!this.embedStarted.has(key)) {
+        this.embedStarted.add(key);
+        this.history.push(t.id);
+        if (!t.youtube?.madeForKids) void api.event(t.id, 'play_start', { context: this.state.context?.kind });
+      }
+    }
+    if (state === 'ended') {
+      this.finishCurrent('complete');
+      // Autoplay of the next track only inside Резонанс, which the user switched on; the embed
+      // itself then starts only if it is > 50 % visible. Plain lists stop at the end.
+      if (this.state.context?.kind === 'wave') this.advance(1, false);
+    }
+  }
+  onEmbedError(message: string) {
+    this.store.set({ error: message, playing: false, loading: false });
   }
   stop() {
     this.audio.pause();
@@ -383,13 +478,18 @@ class Player {
         /* unsupported action */
       }
     };
-    h('play', () => void this.audio.play());
-    h('pause', () => this.audio.pause());
-    h('nexttrack', () => this.next());
-    h('previoustrack', () => this.prev());
+    // Lock-screen / headset controls drive only our own audio — never the YouTube player.
+    h('play', () => !this.state.embed && void this.audio.play());
+    h('pause', () => !this.state.embed && this.audio.pause());
+    h('nexttrack', () => !this.state.embed && this.next());
+    h('previoustrack', () => !this.state.embed && this.prev());
     h('seekto', (d) => d.seekTime !== undefined && this.seek(d.seekTime));
     h('seekbackward', (d) => this.seek(this.audio.currentTime - (d.seekOffset ?? 10)));
     h('seekforward', (d) => this.seek(this.audio.currentTime + (d.seekOffset ?? 10)));
+  }
+  private clearMetadata() {
+    const ms = navigator.mediaSession;
+    if (ms) ms.metadata = null;
   }
   private setMetadata(t: Track) {
     const ms = navigator.mediaSession;

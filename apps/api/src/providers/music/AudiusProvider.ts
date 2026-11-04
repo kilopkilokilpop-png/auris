@@ -1,7 +1,7 @@
 import type { Album, Artist, Genre, QualityTier, Track } from '@auris/shared';
 import { fetchJson, OutboundLimiter, TtlCache, UpstreamError } from '../../lib/http.js';
 import { canonicalGenre, GENRE_NAMES_RU } from './genres.js';
-import { stripPrefix, type DownloadDecision, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
+import { stripPrefix, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
 
 /**
  * Audius (https://docs.audius.co) — open music network where artists upload their own tracks.
@@ -9,7 +9,7 @@ import { stripPrefix, type DownloadDecision, type MusicProvider, type ProviderIn
  * Rules applied here:
  *  - only tracks that are streamable and NOT gated (paid / follow-gated) are offered;
  *  - full-length playback through the API stream endpoint, proxied by our server;
- *  - downloads to Telegram are OFF: re-distributing files is not explicitly granted -> unknown rights = deny;
+ *  - no downloads (AURIS has none);
  *  - attribution: artist + backlink to the track page on audius.co.
  */
 const P = 'audius';
@@ -73,7 +73,6 @@ export class AudiusProvider implements MusicProvider {
     name: 'Audius',
     fullStreams: true,
     previewsOnly: false,
-    downloads: false,
     notice: 'Audius: полные треки, которые артисты сами выкладывают в открытую сеть Audius. Скачивание в Telegram недоступно.',
     maxTier: 'standard',
     tiers: { standard: 'MP3' },
@@ -131,8 +130,6 @@ export class AudiusProvider implements MusicProvider {
         ? { kind: 'full', playableSec: t.duration, qualities: [{ tier: 'standard', codec: 'mp3', lossless: false }] }
         : { kind: 'none', playableSec: 0, qualities: [], note: 'Артист ограничил прослушивание этого трека' },
       license: { name: 'Audius — права у артиста', attribution: t.user.name, sourceUrl: t.permalink ? `${SITE}${t.permalink}` : SITE },
-      downloadable: false,
-      downloadNote: 'Audius не разрешает пересылать файлы треков — их можно только слушать',
     };
   }
   private list(tracks: AuTrack[] | undefined, limit: number) {
@@ -248,11 +245,6 @@ export class AudiusProvider implements MusicProvider {
     if (!t || !audiusPlayable(t)) return null;
     // Redirects to a content node serving MP3 with byte ranges; our proxy follows it.
     return { url: this.url(`/tracks/${encodeURIComponent(t.id)}/stream`), mime: 'audio/mpeg', kind: 'full', playableSec: t.duration, tier: 'standard' };
-  }
-
-  async getDownload(_id: string): Promise<DownloadDecision> {
-    void _id;
-    return { allowed: false, code: 'rights_unknown', reason: 'Audius не разрешает пересылать файлы треков — их можно только слушать' };
   }
 
   async match(hint: RecognizedHint) {

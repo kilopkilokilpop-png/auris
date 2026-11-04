@@ -4,10 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createPgliteDb } from '../db/db.js';
-import { auth, FakeSender, makeApp, multipartBody } from './helpers.js';
+import { YouTubeRetention } from '../services/retention.js';
+import { auth, fakeYouTube, makeApp, multipartBody } from './helpers.js';
 
 const ctx = await makeApp();
-const { app, sender } = ctx;
+const { app } = ctx;
 afterAll(async () => {
   await app.close();
   await ctx.db.close();
@@ -26,7 +27,7 @@ describe('auth & security', () => {
   it('accepts valid initData and creates the user', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/me', headers: auth(501, 'Ада') });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toMatchObject({ id: 501, firstName: 'Ада', isMaster: false, stats: { liked: 0, playlists: 0 } });
+    expect(r.json()).toMatchObject({ id: 501, firstName: 'Ада', termsAccepted: false, stats: { liked: 0, playlists: 0 } });
   });
   it('allows CORS only for the Mini App origin', async () => {
     const ok = await app.inject({ method: 'OPTIONS', url: '/api/me', headers: { origin: 'https://app.auris.test', 'access-control-request-method': 'GET' } });
@@ -50,47 +51,114 @@ describe('auth & security', () => {
   });
 });
 
-describe('downloads', () => {
-  it('refuses a Deezer track even on a direct API call', async () => {
-    const before = sender.calls.length;
-    const r = await app.inject({ method: 'POST', url: '/api/downloads', headers: auth(), payload: { trackId: 'deezer:3135556' } });
-    expect(r.statusCode).toBe(403);
-    expect(r.json().error.code).toBe('DOWNLOAD_FORBIDDEN');
-    expect(sender.calls.length).toBe(before);
-    const c = await app.inject({ method: 'GET', url: '/api/downloads/check/deezer:3135556', headers: auth() });
-    expect(c.json()).toEqual({ allowed: false, reason: expect.stringMatching(/Deezer/) });
+describe('terms of use & privacy policy', () => {
+  it('blocks every feature until the terms are accepted, then lets the user in', async () => {
+    const c = await makeApp({ terms: false });
+    const me = await c.app.inject({ method: 'GET', url: '/api/me', headers: auth(610) });
+    expect(me.json().termsAccepted).toBe(false);
+    const blocked = await c.app.inject({ method: 'GET', url: '/api/search?q=test', headers: auth(610) });
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json().error.code).toBe('TERMS_REQUIRED');
+    const ok = await c.app.inject({ method: 'POST', url: '/api/terms/accept', headers: auth(610) });
+    expect(ok.json().termsAccepted).toBe(true);
+    expect((await c.app.inject({ method: 'GET', url: '/api/search?q=test', headers: auth(610) })).statusCode).toBe(200);
+    // Erasure works even without accepting (nothing is gated behind consent to delete).
+    expect((await c.app.inject({ method: 'DELETE', url: '/api/me', headers: auth(611) })).statusCode).toBe(200);
+    await c.app.close();
   });
+});
 
-  it('sends an allowed track with metadata, then reuses the cached file_id', async () => {
-    const r = await app.inject({ method: 'POST', url: '/api/downloads', headers: auth(502), payload: { trackId: 'mock:t1' } });
-    expect(r.statusCode, r.body).toBe(200);
-    expect(r.json()).toEqual({ status: 'sent', cached: false });
-    const call = sender.calls.at(-1)!;
-    expect(call.chatId).toBe(502);
-    expect('path' in call.input && call.size! > 10_000).toBe(true);
-    expect(call.meta).toMatchObject({ title: 'Магнитное поле', performer: 'Северный Шум', durationSec: 45 });
-    expect(call.meta.thumbnail?.length).toBeGreaterThan(100);
-    const again = await app.inject({ method: 'POST', url: '/api/downloads', headers: auth(502), payload: { trackId: 'mock:t1' } });
-    expect(again.json()).toEqual({ status: 'sent', cached: true });
-    expect(sender.calls.at(-1)!.input).toEqual({ fileId: 'FILE_1' });
-    const rows = await ctx.db.query<{ track_id: string; provider: string }>('SELECT track_id, provider FROM downloads WHERE user_id=502');
-    expect(rows.rows).toHaveLength(2);
-    expect(rows.rows[0]).toEqual({ track_id: 'mock:t1', provider: 'mock' });
+describe('no downloads in this version', () => {
+  it('has no download endpoints and no download fields on tracks', async () => {
+    expect((await app.inject({ method: 'POST', url: '/api/downloads', headers: auth(), payload: { trackId: 'mock:t1' } })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: '/internal/download', headers: { 'x-internal-secret': 'internal-secret' }, payload: { userId: 1, trackId: 'mock:t1' } })).statusCode).toBe(404);
+    const t = await app.inject({ method: 'GET', url: '/api/tracks/mock:t1', headers: auth() });
+    expect(JSON.stringify(t.json())).not.toMatch(/downloadable|downloadNote/);
   });
+});
 
-  it('explains how to start the bot when Telegram refuses to message the user', async () => {
-    sender.notStarted.add(503);
-    const r = await app.inject({ method: 'POST', url: '/api/downloads', headers: auth(503), payload: { trackId: 'mock:t2' } });
-    expect(r.statusCode).toBe(409);
-    expect(r.json().error).toMatchObject({ code: 'BOT_NOT_STARTED', botLink: 'https://t.me/auris_test_bot?start=download' });
+describe('YouTube (separate section, official player only)', () => {
+  it('search returns one section per source; YouTube is never mixed into other results', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/search?q=песня', headers: auth() });
+    const sections = r.json().sections as { provider: string; tracks: { id: string; provider: string }[] }[];
+    expect(sections.map((x) => x.provider)).toEqual(['mock', 'youtube', 'deezer']);
+    for (const sec of sections) expect(sec.tracks.every((t) => t.provider === sec.provider)).toBe(true);
+    const yt = sections.find((x) => x.provider === 'youtube')!;
+    // Not embeddable -> excluded. Title passed through unchanged.
+    expect(yt.tracks.map((t) => t.id)).toEqual(['youtube:aaaaaaaaaa1', 'youtube:aaaaaaaaaa2']);
+    expect((yt.tracks[0] as unknown as { title: string }).title).toBe('Песня &amp; Клип (Official Video)');
+    expect(JSON.stringify(r.json())).not.toContain('YT-SECRET-KEY');
   });
-
-  it('enforces the per-user daily download quota', async () => {
-    const c = await makeApp({ env: { DOWNLOADS_PER_DAY: '1' }, sender: new FakeSender() });
-    expect((await c.app.inject({ method: 'POST', url: '/api/downloads', headers: auth(9), payload: { trackId: 'mock:t3' } })).statusCode).toBe(200);
-    const r = await c.app.inject({ method: 'POST', url: '/api/downloads', headers: auth(9), payload: { trackId: 'mock:t4' } });
-    expect(r.statusCode).toBe(429);
-    expect(r.json().error.code).toBe('DOWNLOAD_QUOTA');
+  it('maps videos to embed-only tracks with attribution, no stats, no stream', async () => {
+    const t = (await app.inject({ method: 'GET', url: '/api/tracks/youtube:aaaaaaaaaa1', headers: auth() })).json();
+    expect(t.playback).toMatchObject({ kind: 'embed', playableSec: 213, qualities: [] });
+    expect(t.license).toMatchObject({ name: 'YouTube', sourceUrl: 'https://www.youtube.com/watch?v=aaaaaaaaaa1' });
+    expect(t.popularity).toBe(0.5);
+    expect(t.youtube).toMatchObject({ videoId: 'aaaaaaaaaa1', channelTitle: 'Канал Артиста', madeForKids: false });
+    const s = await app.inject({ method: 'GET', url: '/api/stream-url/youtube:aaaaaaaaaa1', headers: auth() });
+    expect(s.statusCode).toBe(400);
+  });
+  it('keeps YouTube out of merged lists (charts, collections, wave from other sources)', async () => {
+    const chart = (await app.inject({ method: 'GET', url: '/api/charts', headers: auth() })).json();
+    expect(chart.tracks.some((t: { provider: string }) => t.provider === 'youtube')).toBe(false);
+  });
+  it('Made for Kids: no events, no likes, never in the wave', async () => {
+    const ev = await app.inject({ method: 'POST', url: '/api/events', headers: auth(620), payload: { trackId: 'youtube:aaaaaaaaaa2', kind: 'play_start' } });
+    expect(ev.json()).toEqual({ ok: true, stored: false });
+    const like = await app.inject({ method: 'POST', url: '/api/likes/youtube:aaaaaaaaaa2', headers: auth(620) });
+    expect(like.statusCode).toBe(400);
+    const rows = await ctx.db.query('SELECT 1 FROM events WHERE user_id=620');
+    expect(rows.rows).toHaveLength(0);
+    const w = await app.inject({ method: 'POST', url: '/api/wave/next', headers: auth(620), payload: { count: 20 } });
+    expect(w.json().items.some((i: { track: { id: string } }) => i.track.id === 'youtube:aaaaaaaaaa2')).toBe(false);
+  });
+  it('wave: a liked YouTube channel brings its videos in (search by what the user liked), never "popular" by YouTube stats', async () => {
+    const h = auth(640);
+    expect((await app.inject({ method: 'POST', url: '/api/likes/youtube:aaaaaaaaaa1', headers: h })).statusCode).toBe(200);
+    const w = await app.inject({ method: 'POST', url: '/api/wave/next', headers: h, payload: { count: 20, mode: 'favorite' } });
+    const items = w.json().items as { track: { provider: string; id: string }; reasons: string[] }[];
+    const ytItems = items.filter((i) => i.track.provider === 'youtube');
+    expect(ytItems.length).toBeGreaterThan(0);
+    expect(ytItems.every((i) => !i.reasons.includes('Популярно сейчас'))).toBe(true);
+    expect(ytItems.some((i) => i.track.id === 'youtube:aaaaaaaaaa2')).toBe(false); // Made for Kids
+  });
+  it('quota exhausted: readable notice, cached results still served, other sources unaffected', async () => {
+    const yt = fakeYouTube();
+    const c = await makeApp({ youtube: yt });
+    const first = await c.app.inject({ method: 'GET', url: '/api/search?q=кэш', headers: auth() });
+    expect(first.json().sections.find((x: { provider: string }) => x.provider === 'youtube').tracks.length).toBe(2);
+    yt.setQuotaOut(true);
+    const cached = await c.app.inject({ method: 'GET', url: '/api/search?q=кэш', headers: auth() });
+    expect(cached.json().sections.find((x: { provider: string }) => x.provider === 'youtube').tracks.length).toBe(2);
+    const fresh = await c.app.inject({ method: 'GET', url: '/api/search?q=Северный', headers: auth() });
+    const sec = fresh.json().sections.find((x: { provider: string }) => x.provider === 'youtube');
+    expect(sec.tracks).toEqual([]);
+    expect(sec.notice).toMatch(/Лимит запросов к YouTube/);
+    expect(fresh.json().sections.find((x: { provider: string }) => x.provider === 'mock').tracks.length).toBeGreaterThan(0);
+    await c.app.close();
+  });
+  it('retention: data older than the limit is refreshed; deleted videos are forgotten everywhere', async () => {
+    const yt = fakeYouTube();
+    const c = await makeApp({ youtube: yt });
+    await c.app.inject({ method: 'POST', url: '/api/likes/youtube:aaaaaaaaaa1', headers: auth(630) });
+    await c.db.query(`UPDATE track_snapshots SET updated_at = now() - interval '40 days' WHERE track_id='youtube:aaaaaaaaaa1'`);
+    const ret = new YouTubeRetention(yt.provider, c.services.store, 29);
+    expect(await ret.run()).toEqual({ refreshed: 1, removed: 0 });
+    const age = await c.db.query<{ d: number }>(`SELECT extract(day from now() - updated_at)::int AS d FROM track_snapshots WHERE track_id='youtube:aaaaaaaaaa1'`);
+    expect(age.rows[0]!.d).toBe(0);
+    // The video is deleted on YouTube.
+    delete yt.videos.aaaaaaaaaa1;
+    await c.db.query(`UPDATE track_snapshots SET updated_at = now() - interval '40 days' WHERE track_id='youtube:aaaaaaaaaa1'`);
+    expect(await ret.run()).toEqual({ refreshed: 0, removed: 1 });
+    expect((await c.db.query(`SELECT 1 FROM likes WHERE track_id='youtube:aaaaaaaaaa1'`)).rows).toHaveLength(0);
+    expect((await c.db.query(`SELECT 1 FROM track_snapshots WHERE track_id='youtube:aaaaaaaaaa1'`)).rows).toHaveLength(0);
+    // Quota out + over the hard 30-day limit -> deleted instead of kept.
+    const noQuota = fakeYouTube();
+    noQuota.setQuotaOut(true);
+    await c.services.store.saveSnapshots([noQuota.provider.toTrack(noQuota.videos.aaaaaaaaaa2!)]);
+    await c.db.query(`UPDATE track_snapshots SET updated_at = now() - interval '31 days' WHERE track_id='youtube:aaaaaaaaaa2'`);
+    expect((await new YouTubeRetention(noQuota.provider, c.services.store, 29).run()).removed).toBe(1);
+    expect((await c.db.query(`SELECT 1 FROM track_snapshots WHERE track_id='youtube:aaaaaaaaaa2'`)).rows).toHaveLength(0);
     await c.app.close();
   });
 });

@@ -6,13 +6,14 @@ import { withTransition } from './transition';
 
 export type Tab = 'home' | 'wave' | 'hear' | 'profile';
 export type Overlay =
-  | { name: 'search' }
+  | { name: 'search'; q?: string; source?: 'youtube' }
   | { name: 'settings' }
   | { name: 'album'; id: string }
   | { name: 'artist'; id: string }
   | { name: 'playlist'; id: string; title: string }
   | { name: 'collection'; id: string; title: string }
-  | { name: 'onboarding' };
+  | { name: 'onboarding' }
+  | { name: 'legal'; page: 'terms' | 'privacy' };
 
 export const nav = new Store<{ tab: Tab; stack: Overlay[] }>({ tab: 'home', stack: [] });
 

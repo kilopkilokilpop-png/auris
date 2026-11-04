@@ -4,6 +4,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { bootTelegram } from './lib/telegram';
+import { player } from './lib/player';
+
+// Development builds only: lets e2e tests read the player state.
+if (import.meta.env.DEV) (window as unknown as { __auris: unknown }).__auris = { player };
 
 const root = createRoot(document.getElementById('root')!);
 bootTelegram()

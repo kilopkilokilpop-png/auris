@@ -51,6 +51,8 @@ export function trackBadge(track: Track, tier: QualityTier = 'hires'): TrackBadg
   if (track.playback.kind === 'none') {
     return { kind: 'unavailable', label: 'НЕТ', description: track.playback.note ?? 'Нельзя послушать в AURIS' };
   }
+  // YouTube: no real quality data -> never a quality badge.
+  if (track.playback.kind === 'embed') return { kind: 'none', label: '', description: '' };
   if (track.playback.kind === 'preview') {
     return {
       kind: 'preview',
@@ -72,6 +74,7 @@ export function trackBadge(track: Track, tier: QualityTier = 'hires'): TrackBadg
 export function playerQualityLine(track: Track, tier: QualityTier): string {
   if (track.playback.kind === 'preview') return `ПРЕВЬЮ · ${Math.round(track.playback.playableSec)} С`;
   if (track.playback.kind === 'none') return 'НЕДОСТУПНО';
+  if (track.playback.kind === 'embed') return '';
   const v = pickVariant(track.playback.qualities, tier);
   if (!v) return '';
   const bd = bitDepthLabel(v);

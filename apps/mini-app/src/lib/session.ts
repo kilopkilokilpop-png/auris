@@ -1,9 +1,9 @@
 import type { CatalogCapabilities, QualityTier, Track, UserProfile } from '@auris/shared';
-import { api, ApiFailure } from './api';
+import { api } from './api';
 import { player } from './player';
 import { Store } from './store';
 import { tg } from './telegram';
-import { openSheet, toast } from './ui';
+import { toast } from './ui';
 
 interface SessionState {
   profile: UserProfile | null;
@@ -14,8 +14,14 @@ interface SessionState {
 export const session = new Store<SessionState>({ profile: null, capabilities: null, liked: new Set(), likedVersion: 0 });
 
 export async function loadSession() {
+  const me = await api.me();
+  if (!me.termsAccepted) {
+    // Nothing else is reachable before the terms + privacy policy are accepted.
+    session.set({ profile: me });
+    return me;
+  }
   const [profile, likes, capabilities, config] = await Promise.all([
-    api.me(),
+    Promise.resolve(me),
     api.likedIds().catch(() => ({ ids: [] })),
     api.capabilities().catch(() => null),
     api.publicConfig().catch(() => ({ botUsername: null })),
@@ -32,6 +38,13 @@ export async function loadSession() {
   session.set({ profile, liked: new Set(likes.ids), capabilities });
   player.setQuality(profile.settings.quality);
   return profile;
+}
+
+/** Consent screen: accept AURIS terms (incl. YouTube ToS) + privacy policy (incl. Google Privacy Policy). */
+export async function acceptTerms() {
+  await api.acceptTerms();
+  tg.haptic.success();
+  return loadSession();
 }
 
 export function refreshProfile() {
@@ -72,40 +85,4 @@ export async function toggleLike(track: Track) {
     session.set((s) => ({ liked: back, likedVersion: s.likedVersion + 1 }));
     toast('Не удалось обновить избранное');
   }
-}
-
-/** "Скачать в Telegram": the server decides; we only explain the outcome. */
-export async function downloadToTelegram(track: Track) {
-  if (!track.downloadable) {
-    tg.haptic.warning();
-    openSheet({ kind: 'info', title: 'Скачивание недоступно', body: downloadExplanation(track) });
-    return;
-  }
-  toast('Отправляем в чат с ботом…');
-  try {
-    await api.download(track.id);
-    tg.haptic.success();
-    toast('Готово — трек в чате с ботом. Открываю Telegram…');
-    // Take the user straight to the chat where the audio file just arrived.
-    setTimeout(() => tg.openBot(tg.botUsername ? `https://t.me/${tg.botUsername}` : undefined), 600);
-  } catch (e) {
-    tg.haptic.error();
-    if (e instanceof ApiFailure && e.code === 'BOT_NOT_STARTED') {
-      openSheet({
-        kind: 'info',
-        title: 'Запустите бота',
-        body: 'Telegram не разрешает ботам писать первыми. Откройте чат с ботом AURIS и нажмите «Запустить», затем повторите скачивание.',
-        action: { label: 'Открыть бота', run: () => tg.openBot(e.botLink) },
-      });
-    } else if (e instanceof ApiFailure && e.code === 'DOWNLOAD_FORBIDDEN') {
-      openSheet({ kind: 'info', title: 'Скачивание недоступно', body: e.message });
-    } else {
-      toast(e instanceof Error ? e.message : 'Не удалось отправить файл');
-    }
-  }
-}
-
-export function downloadExplanation(t: Track): string {
-  if (t.provider === 'deezer') return 'Deezer разрешает только 30-секундные превью внутри приложения. Скачивание и отправка файлов запрещены условиями Deezer API.';
-  return t.downloadNote ?? 'Правообладатель не разрешил скачивание этого трека. Его можно слушать в AURIS.';
 }

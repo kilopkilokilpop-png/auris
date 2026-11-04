@@ -7,7 +7,7 @@ import { Cover } from './Cover';
 import { IconHeart, IconNext, IconPause, IconPlay, IconVolume } from './Icons';
 import { VolumeControl } from './Volume';
 
-/** Like, volume, play/pause and next — without opening the full player. */
+/** Like, volume, play/pause and next — without opening the full player. Audio sources only (never YouTube). */
 export function MiniPlayer() {
   const track = useStore(player.store, (s) => s.queue[s.index]);
   const playing = useStore(player.store, (s) => s.playing);
@@ -17,7 +17,8 @@ export function MiniPlayer() {
   const volume = useStore(player.store, (s) => s.volume);
   const liked = useStore(session, (s) => (track ? s.liked.has(track.id) : false));
   const [showVolume, setShowVolume] = useState(false);
-  if (!track) return null;
+  // YouTube tracks have no mini-player: they play only in the visible official player.
+  if (!track || track.playback.kind === 'embed') return null;
   return (
     <>
       {showVolume ? (

@@ -3,12 +3,12 @@ import type { Playlist, Track } from '@auris/shared';
 import { api } from '../lib/api';
 import { player } from '../lib/player';
 import { go } from '../lib/router';
-import { downloadExplanation, downloadToTelegram, session, toggleLike } from '../lib/session';
+import { session, toggleLike } from '../lib/session';
 import { useStore } from '../lib/store';
 import { closeSheet, openSheet, toast, ui } from '../lib/ui';
 import { tg } from '../lib/telegram';
 import { Cover } from './Cover';
-import { IconAlbum, IconDownload, IconHeart, IconInfo, IconPlay, IconPlus, IconThumbDown, IconUser } from './Icons';
+import { IconAlbum, IconHeart, IconInfo, IconPlay, IconPlus, IconThumbDown, IconUser } from './Icons';
 
 export function ToastHost() {
   const t = useStore(ui, (s) => s.toast);
@@ -105,24 +105,25 @@ export function TrackSheet({ track }: { track: Track }) {
         </span>
       </div>
       {!isCurrent && track.playback.kind !== 'none' ? (
-        <SheetItem icon={<IconPlay />} label={track.playback.kind === 'preview' ? 'Слушать превью 30 с' : 'Слушать'} onClick={run(() => player.playList([track], 0, { label: 'Трек', kind: 'list' }))} />
+        <SheetItem
+          icon={<IconPlay />}
+          label={track.playback.kind === 'preview' ? 'Слушать превью 30 с' : track.playback.kind === 'embed' ? 'Смотреть в плеере YouTube' : 'Слушать'}
+          onClick={run(() => player.playList([track], 0, { label: 'Трек', kind: 'list' }))}
+        />
       ) : null}
-      <SheetItem icon={<IconHeart filled={liked} />} label={liked ? 'Убрать из избранного' : 'В избранное'} onClick={run(() => void toggleLike(track))} />
-      <SheetItem icon={<IconPlus />} label="Добавить в плейлист" onClick={() => openSheet({ kind: 'playlist-pick', track })} />
-      <SheetItem
-        icon={<IconDownload />}
-        label="Скачать в Telegram"
-        hint={track.downloadable ? 'Бот пришлёт файл в чат' : downloadExplanation(track)}
-        disabled={!track.downloadable}
-        onClick={run(() => void downloadToTelegram(track))}
-      />
+      {track.youtube?.madeForKids ? null : (
+        <>
+          <SheetItem icon={<IconHeart filled={liked} />} label={liked ? 'Убрать из избранного' : 'В избранное'} onClick={run(() => void toggleLike(track))} />
+          <SheetItem icon={<IconPlus />} label="Добавить в плейлист" onClick={() => openSheet({ kind: 'playlist-pick', track })} />
+        </>
+      )}
       {isCurrent ? <SheetItem icon={<IconThumbDown />} label="Не нравится" hint="Пропустить и реже предлагать похожее" onClick={run(() => void player.dislikeCurrent())} /> : null}
       {track.album ? <SheetItem icon={<IconAlbum />} label="Открыть альбом" onClick={run(() => go.push({ name: 'album', id: track.album!.id }))} /> : null}
-      <SheetItem icon={<IconUser />} label={`Артист: ${track.artist.name}`} onClick={run(() => go.push({ name: 'artist', id: track.artist.id }))} />
+      <SheetItem icon={<IconUser />} label={track.provider === 'youtube' ? `Канал: ${track.artist.name}` : `Артист: ${track.artist.name}`} onClick={run(() => go.push({ name: 'artist', id: track.artist.id }))} />
       <SheetItem
         icon={<IconInfo />}
         label="Источник и лицензия"
-        hint={track.license.name}
+        hint={`${track.provider === 'youtube' ? 'YouTube' : track.license.name}`}
         onClick={() =>
           openSheet({
             kind: 'info',
@@ -131,11 +132,26 @@ export function TrackSheet({ track }: { track: Track }) {
               <>
                 <p>Лицензия: {track.license.name}</p>
                 {track.license.attribution ? <p>Авторы: {track.license.attribution}</p> : null}
-                <p>{track.playback.kind === 'preview' ? 'Доступно только 30-секундное превью — полную версию этот источник не предоставляет.' : track.playback.kind === 'full' ? 'Полная версия трека.' : 'Воспроизведение недоступно.'}</p>
+                <p>
+                  {track.playback.kind === 'preview'
+                    ? 'Доступно только 30-секундное превью — полную версию этот источник не предоставляет.'
+                    : track.playback.kind === 'embed'
+                      ? 'Видео YouTube: играет только в официальном плеере YouTube, пока он открыт на экране. Без скачивания и фонового режима.'
+                      : track.playback.kind === 'full'
+                        ? 'Полная версия трека. Скачивания в AURIS нет.'
+                        : 'Воспроизведение недоступно.'}
+                </p>
+                {track.license.url ? (
+                  <p>
+                    <a href={track.license.url} target="_blank" rel="noopener" style={{ color: 'var(--text)' }}>
+                      {track.provider === 'youtube' ? 'Условия использования YouTube' : `Текст лицензии ${track.license.name}`}
+                    </a>
+                  </p>
+                ) : null}
                 {track.license.sourceUrl ? (
                   <p>
-                    <a href={track.license.sourceUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--text)' }}>
-                      Страница трека у источника
+                    <a href={track.license.sourceUrl} target="_blank" rel="noopener" style={{ color: 'var(--text)' }}>
+                      {track.provider === 'youtube' ? 'Смотреть на YouTube' : 'Страница трека у источника'}
                     </a>
                   </p>
                 ) : null}

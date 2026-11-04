@@ -9,7 +9,6 @@ the recommender or the bot changes — only `.env`:
 MUSIC_PROVIDERS=licensed            # or licensed,jamendo
 LICENSED_API_URL=https://catalog.example.com
 LICENSED_API_KEY=...
-LICENSED_DOWNLOADS_CONTRACTED=false # true only when the signed contract grants download + sending files
 LICENSED_CACHE_FILE_ID=false        # true only when the contract allows re-sending a cached Telegram file
 ```
 
@@ -23,7 +22,7 @@ Track = {
   id, title, artist: { id, name }, album?: { id, title, coverUrl? }, durationSec, isrc?,
   genres?: string[], moods?: string[], popularity?: 0..1,
   variants: Variant[],            // real deliverable files; Hi-Res is shown only if bitDepth >= 24 is declared
-  rights: { stream: boolean, preview: boolean, download: boolean, fileIdCache?: boolean },
+  rights: { stream: boolean, preview: boolean },
   previewSec?, licenseLabel?
 }
 ```
@@ -36,7 +35,6 @@ Track = {
 | GET | `/v1/tracks/:id` | `Track` (rights evaluated for the end user's territory) |
 | GET | `/v1/tracks?isrc=` | `Track[]` (used to match Слух results) |
 | GET | `/v1/tracks/:id/stream?codec=&tier=` | `{ url, mime }` short-lived signed URL |
-| GET | `/v1/tracks/:id/download` | `{ url, mime: 'audio/mpeg'\|'audio/mp4', sizeBytes? }` — only if `rights.download` |
 | GET | `/v1/albums/:id` | `{ id, title, artist, coverUrl?, tracks: Track[] }` |
 | GET | `/v1/artists/:id` / `/top?limit=` / `/related?limit=` | artist / `Track[]` / artists |
 | GET | `/v1/charts/tracks?limit=` / `/v1/charts/artists?limit=` | `Track[]` / artists |
@@ -45,8 +43,7 @@ Track = {
 ## Rules enforced by the adapter
 
 * Playback `full` only with `rights.stream`; `preview` with `rights.preview` (shown as preview in UI); otherwise not playable.
-* Download allowed only when **both** `LICENSED_DOWNLOADS_CONTRACTED=true` **and** `rights.download === true`.
-  Any error while checking rights → deny (`rights_unknown`).
-* `file_id` reuse only when `LICENSED_CACHE_FILE_ID=true` **and** `rights.fileIdCache === true`.
-  When rights are revoked the next `getDownload` denies and the cached `file_id` is deleted
-  (`pnpm --filter @auris/api revoke <trackId>` purges it immediately).
+  Any error while checking rights → deny.
+
+
+This version of AURIS has **no downloads**: only `rights.stream` / `rights.preview` are used.

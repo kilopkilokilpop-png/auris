@@ -11,7 +11,7 @@ import {
   type MockTrack,
 } from './mock-catalog.js';
 import { MockMedia, type MockVariant } from './mock-media.js';
-import { stripPrefix, type DownloadDecision, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
+import { stripPrefix, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
 
 const P = 'mock';
 const MP3: AudioQuality = { tier: 'standard', codec: 'mp3', bitrateKbps: 192, lossless: false };
@@ -26,7 +26,6 @@ export class MockProvider implements MusicProvider {
     name: 'Демо-каталог AURIS',
     fullStreams: true,
     previewsOnly: false,
-    downloads: true,
     notice: 'Демо-каталог: оригинальные синтезированные треки AURIS по 45 секунд, лицензия CC0.',
     maxTier: 'hires',
     tiers: { standard: 'MP3 192 кбит/с', hifi: 'FLAC 16 бит / 44,1 кГц', hires: 'до 24 бит / 96 кГц' },
@@ -65,7 +64,6 @@ export class MockProvider implements MusicProvider {
       popularity: t.popularity,
       playback: { kind: 'full', playableSec: MOCK_DURATION_SEC, qualities },
       license: { name: 'CC0 1.0', url: 'https://creativecommons.org/publicdomain/zero/1.0/', attribution: `${a.name} (демо AURIS)` },
-      downloadable: true,
     };
   }
   private toArtist(a: MockArtist): Artist {
@@ -155,18 +153,6 @@ export class MockProvider implements MusicProvider {
     const variant: MockVariant = v.tier === 'hires' ? 'hires' : v.tier === 'hifi' ? 'hifi' : 'mp3';
     const filePath = await this.media.ensureAudio(t, variant);
     return { url: '', filePath, mime: variant === 'mp3' ? 'audio/mpeg' : 'audio/flac', kind: 'full', playableSec: MOCK_DURATION_SEC, tier: v.tier };
-  }
-
-  async getDownload(id: string): Promise<DownloadDecision> {
-    const t = MOCK_TRACKS.find((x) => x.id === stripPrefix(id, P));
-    if (!t) return { allowed: false, code: 'not_found', reason: 'Трек не найден' };
-    const filePath = await this.media.ensureAudio(t, 'mp3');
-    return {
-      allowed: true,
-      source: { filePath, mime: 'audio/mpeg', filename: `${this.artistOf(t.artist).name} — ${t.title}.mp3` },
-      cacheFileId: true,
-      attribution: `${this.artistOf(t.artist).name} · демо AURIS · CC0`,
-    };
   }
 
   async match(hint: RecognizedHint) {

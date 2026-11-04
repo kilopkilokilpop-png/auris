@@ -5,7 +5,7 @@ import { formatDuration, plural, dayPart } from './format.js';
 
 const base: Track = {
   id: 'mock:1', provider: 'mock', title: 'T', artist: { id: 'mock:a', name: 'A' }, durationSec: 200,
-  genres: [], tags: [], popularity: 0.5, license: { name: 'CC0' }, downloadable: false,
+  genres: [], tags: [], popularity: 0.5, license: { name: 'CC0' },
   playback: { kind: 'full', playableSec: 200, qualities: [] },
 };
 const mp3: AudioQuality = { tier: 'standard', codec: 'mp3', bitrateKbps: 320, lossless: false };
@@ -34,6 +34,14 @@ describe('quality', () => {
     expect(playerQualityLine({ ...base, playback: { ...base.playback, qualities: [flac24] } }, 'hires')).toBe('HI-RES · 24/96');
     expect(trackBadge({ ...base, playback: { ...base.playback, qualities: [mp3, flac16] } }).label).toBe('FLAC');
     expect(trackBadge({ ...base, playback: { ...base.playback, qualities: [mp3] } }).label).toBe('');
+  });
+});
+
+describe('YouTube', () => {
+  it('never shows quality badges or a quality line (no real quality data)', () => {
+    const yt = { ...base, provider: 'youtube' as const, playback: { kind: 'embed' as const, playableSec: 200, qualities: [flac24] } };
+    expect(trackBadge(yt).label).toBe('');
+    expect(playerQualityLine(yt, 'hires')).toBe('');
   });
 });
 

@@ -1,14 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { formatDuration } from '@auris/shared';
-import { IconChevronDown, IconDownload, IconHeart, IconInfo, IconMore, IconNext, IconPause, IconPlay, IconPrev, IconRepeat, IconShuffle, IconThumbDown, LogoMark } from '../components/Icons';
+import { IconChevronDown, IconHeart, IconInfo, IconMore, IconNext, IconPause, IconPlay, IconPrev, IconRepeat, IconShuffle, IconThumbDown, LogoMark } from '../components/Icons';
+import { Attribution, SOURCE_NAMES } from '../components/Source';
+import { YouTubePlayerScreen } from './PlayerYouTube';
 import { VolumeControl } from '../components/Volume';
 import { closePlayer } from '../lib/router';
 import { player } from '../lib/player';
-import { downloadToTelegram, session, toggleLike } from '../lib/session';
+import { session, toggleLike } from '../lib/session';
 import { useStore } from '../lib/store';
 import { openSheet } from '../lib/ui';
-
-const SOURCE_NAMES: Record<string, string> = { audius: 'Audius', jamendo: 'Jamendo', deezer: 'Deezer', licensed: 'Лицензионный каталог' };
 
 export function Player() {
   const s = useStore(player.store, (x) => x);
@@ -22,6 +22,9 @@ export function Player() {
   const bufPct = duration ? Math.min(100, (s.buffered / duration) * 100) : 0;
   const isPreview = s.streamKind === 'preview' || track.playback.kind === 'preview';
   const reasons = s.reasons[track.id];
+  const next = s.queue[s.index + 1];
+
+  if (track.playback.kind === 'embed' && track.youtube) return <YouTubePlayerScreen />;
 
   return (
     <section className="player" role="dialog" aria-modal="true" aria-label="Плеер">
@@ -46,28 +49,13 @@ export function Player() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="player-title">{track.title}</h1>
           <p className="player-artist">{track.artist.name}</p>
-          {/* Attribution: source platform + backlink to the track page (Audius / Jamendo require it). */}
-          {track.license.sourceUrl && track.provider !== 'mock' ? (
-            <a className="source-link" href={track.license.sourceUrl} target="_blank" rel="noreferrer">
-              {SOURCE_NAMES[track.provider] ?? track.provider} ↗
-            </a>
-          ) : null}
+          <Attribution track={track} />
         </div>
         {s.context?.kind === 'wave' ? (
           <button type="button" className="icon-btn" aria-label="Не нравится" onClick={() => void player.dislikeCurrent()}>
             <IconThumbDown />
           </button>
         ) : null}
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="Скачать в Telegram"
-          aria-disabled={!track.downloadable || undefined}
-          onClick={() => void downloadToTelegram(track)}
-          style={{ opacity: track.downloadable ? 1 : 0.45 }}
-        >
-          <IconDownload />
-        </button>
         <button type="button" className="icon-btn" aria-pressed={liked} aria-label={liked ? 'Убрать из избранного' : 'В избранное'} onClick={() => void toggleLike(track)}>
           <IconHeart filled={liked} key={liked ? 'on' : 'off'} className={`icon ${liked ? 'liked' : ''}`} style={{ width: 26, height: 26 }} />
         </button>
@@ -134,6 +122,11 @@ export function Player() {
           </button>
         </div>
         <VolumeControl />
+        {next ? (
+          <p className="next-up">
+            Дальше: <b>{next.title}</b> · {SOURCE_NAMES[next.provider] ?? next.provider}
+          </p>
+        ) : null}
       </div>
     </section>
   );

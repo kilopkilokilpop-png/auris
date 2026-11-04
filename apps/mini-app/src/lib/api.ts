@@ -12,7 +12,7 @@ import type {
   Playlist,
   QualityTier,
   Recognition,
-  SearchResponse,
+  SearchSection,
   StreamInfo,
   Track,
   UserProfile,
@@ -66,7 +66,8 @@ export const api = {
   home: () => request<{ editorial: Album | null; recent: Track[]; capabilities: CatalogCapabilities }>('GET', '/api/home'),
   publicConfig: () => request<{ botUsername: string | null }>('GET', '/api/public-config'),
   capabilities: () => request<CatalogCapabilities>('GET', '/api/catalog/capabilities'),
-  search: (q: string) => request<SearchResponse>('GET', `/api/search?q=${encodeURIComponent(q)}`),
+  search: (q: string) => request<{ sections: SearchSection[] }>('GET', `/api/search?q=${encodeURIComponent(q)}`),
+  acceptTerms: () => request<UserProfile>('POST', '/api/terms/accept'),
   recentSearches: () => request<{ queries: string[] }>('GET', '/api/search/recent'),
   clearRecentSearches: () => request<{ ok: true }>('DELETE', '/api/search/recent'),
   charts: () => request<{ tracks: Track[]; artists: Artist[] }>('GET', '/api/charts'),
@@ -112,5 +113,4 @@ export const api = {
   },
   recognitions: () => request<{ items: Recognition[] }>('GET', '/api/recognitions'),
 
-  download: (trackId: string) => request<{ status: 'sent'; cached: boolean }>('POST', '/api/downloads', { trackId }),
 };

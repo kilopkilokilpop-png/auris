@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { MOOD_LABELS, WAVE_MODE_LABELS, type Mood, type WaveMode } from '@auris/shared';
 import { Cover } from '../components/Cover';
+import { SOURCE_NAMES } from '../components/Source';
 import { IconHeart, IconNext, IconPause, IconPlay, IconThumbDown } from '../components/Icons';
 import { Segmented } from '../components/Segmented';
 import { player } from '../lib/player';
@@ -14,6 +15,8 @@ import { toast } from '../lib/ui';
 const MOODS = Object.keys(MOOD_LABELS) as Mood[];
 const MODES = Object.keys(WAVE_MODE_LABELS) as WaveMode[];
 
+const isWaveQueue = (t: unknown) => Boolean(t);
+
 export function Wave() {
   const profile = useStore(session, (s) => s.profile);
   const [mood, setMood] = useState<Mood>(profile?.settings.waveMood ?? 'any');
@@ -23,6 +26,9 @@ export function Wave() {
   const playing = useStore(player.store, (s) => s.playing && s.context?.kind === 'wave');
   const track = useStore(player.store, (s) => (s.context?.kind === 'wave' ? s.queue[s.index] : undefined));
   const reasons = useStore(player.store, (s) => (track ? s.reasons[track.id] : undefined));
+  const queue = useStore(player.store, (s) => s.queue);
+  const index = useStore(player.store, (s) => s.index);
+  const upNext = isWaveQueue(track) ? queue.slice(index + 1, index + 4) : [];
   const liked = useStore(session, (s) => (track ? s.liked.has(track.id) : false));
   const error = useStore(player.store, (s) => (s.context?.kind === 'wave' ? s.error : null));
 
@@ -91,6 +97,7 @@ export function Wave() {
                 {track.title}
               </span>
               <span className="row-sub" style={{ display: 'block', fontSize: 12 }}>
+                <span className="source-badge">{SOURCE_NAMES[track.provider] ?? track.provider}</span>
                 {track.artist.name}
                 {track.playback.kind === 'preview' ? ' · превью 30 с' : ''}
               </span>
@@ -109,6 +116,28 @@ export function Wave() {
             </button>
           </div>
         </div>
+      ) : null}
+
+      {upNext.length ? (
+        <section aria-label="Дальше в Резонансе" style={{ marginTop: 14 }}>
+          <h2 className="label">Дальше</h2>
+          <ul className="list" style={{ marginTop: 4 }}>
+            {upNext.map((t) => (
+              <li key={t.id} className="row up-next">
+                <Cover src={t.coverUrl} className="sm" />
+                <span className="row-text">
+                  <span className="row-title" style={{ display: 'block', fontSize: 14 }}>
+                    {t.title}
+                  </span>
+                  <span className="row-sub" style={{ display: 'block', fontSize: 12 }}>
+                    <span className="source-badge">{SOURCE_NAMES[t.provider] ?? t.provider}</span>
+                    {t.artist.name}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       <h2 className="label" style={{ marginTop: 22 }}>

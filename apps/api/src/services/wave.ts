@@ -11,8 +11,10 @@ const top = (m: Map<string, number>, n: number) => [...m.entries()].filter(([, v
 
 /**
  * Candidate sources (no closed recommendation APIs):
- *  1. provider charts; 2. top tracks of liked artists; 3. related artists (provider);
- *  4. favourite genres; 5. mood tags; 6. user's own history/likes; 7. onboarding picks.
+ *  1. provider charts; 2. top tracks of liked artists; 3. related artists (where the provider has them);
+ *  4. favourite genres; 5. mood tags (Jamendo); 6. user's own history/likes; 7. onboarding picks;
+ *  8. YouTube: searches for the user's picked/liked artists and genres + YouTube music chart.
+ * Scores use only AURIS's own events (likes, dislikes, plays, skips) — never YouTube statistics.
  *  (Collaborative filtering over similar users is a planned 8th source.)
  */
 export class WaveService {
@@ -48,8 +50,26 @@ export class WaveService {
       lang ? safe(this.music.getLanguageTracks(lang, 20)) : Promise.resolve([]),
       this.store.likedIds(userId, 40).then((ids) => this.catalog.hydrate(ids)).catch(() => []),
     ]);
+    const liked = lists.at(-1) ?? [];
+    // YouTube (kept separate from merged lists): search queries built from what THIS user picked or liked —
+    // artist names and genres — plus YouTube's own music chart. No hidden "similar videos" workaround.
+    const ytLists = await Promise.all(
+      this.music.separate.flatMap((p) => {
+        const names = new Map<string, string>();
+        for (const t of liked) if (seedArtists.includes(t.artist.id)) names.set(t.artist.id, t.artist.name);
+        const ytChannels = seedArtists.filter((a) => p.owns(a)).slice(0, 2);
+        const otherNames = [...names.entries()].filter(([id]) => !p.owns(id)).map(([, n]) => n).slice(0, 2);
+        return [
+          ...ytChannels.map((c) => safe(p.getArtistTopTracks(c, 8))),
+          ...otherNames.map((n) => safe(p.search(n, { type: 'track', limit: 8 }).then((r) => r.tracks))),
+          ...genres.slice(0, 2).map((g) => safe(p.getGenreTracks(g, 10))),
+          safe(p.getChart(20)),
+        ];
+      }),
+    );
     const map = new Map<string, Track>();
-    for (const t of lists.flat()) if (!map.has(t.id)) map.set(t.id, t);
+    // Made for Kids videos are never personalised (YouTube Developer Policies III.E.4.j / COPPA).
+    for (const t of [...lists.flat(), ...ytLists.flat()]) if (!map.has(t.id) && !t.youtube?.madeForKids && t.playback.kind !== 'none') map.set(t.id, t);
     const pool = [...map.values()];
     this.pools.set(key, pool);
     return pool;

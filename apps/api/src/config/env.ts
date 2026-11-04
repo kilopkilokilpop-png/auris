@@ -50,19 +50,20 @@ export const EnvSchema = z.object({
   /** Dev only: lets the Mini App run in a normal browser with a signed fake user. Ignored in production. */
   ALLOW_DEV_AUTH: bool(true),
 
-  /** Comma list in priority order: mock, deezer, jamendo, licensed */
-  MUSIC_PROVIDERS: z.string().default('mock'),
+  /** Comma list in priority order: mock, youtube, jamendo, audius, licensed (deezer: previews only) */
+  MUSIC_PROVIDERS: z.string().default('mock,youtube'),
   DEEZER_ENABLED_NONCOMMERCIAL: bool(false),
   JAMENDO_CLIENT_ID: optionalStr,
-  /** Jamendo terms forbid content caching beyond what is necessary; keep false unless licensed otherwise. */
-  JAMENDO_CACHE_FILE_ID: bool(false),
   /** Audius asks every API client to identify itself with app_name. No key needed. */
   AUDIUS_APP_NAME: z.string().default('AURIS'),
   LICENSED_API_URL: optionalStr,
   LICENSED_API_KEY: optionalStr,
-  /** Set only after the contract explicitly grants download/sending rights. */
-  LICENSED_DOWNLOADS_CONTRACTED: bool(false),
-  LICENSED_CACHE_FILE_ID: bool(false),
+  /** YouTube Data API v3 key (Google Cloud, ONE project for this app). Empty = YouTube disabled. */
+  YOUTUBE_API_KEY: optionalStr,
+  /** ISO 3166-1 region for search (availability), e.g. RU, DE. */
+  YOUTUBE_REGION: z.string().regex(/^[A-Z]{2}$/).default('RU'),
+  /** How long un-authorized YouTube API data may live in our DB before refresh/delete. Policy max: 30. */
+  YOUTUBE_DATA_MAX_AGE_DAYS: z.coerce.number().int().min(1).max(30).default(29),
 
   /** none | mock (dev only) | audd | acrcloud | comma list for fallback, e.g. "audd,acrcloud" */
   RECOGNITION_PROVIDERS: z.string().default('mock'),
@@ -74,8 +75,8 @@ export const EnvSchema = z.object({
 
   RECOGNITION_PER_DAY: z.coerce.number().int().default(30),
   RECOGNITION_PER_MINUTE: z.coerce.number().int().default(4),
-  DOWNLOADS_PER_DAY: z.coerce.number().int().default(20),
-  DOWNLOAD_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
+  /** Spending cap for paid recognition: max recognition API calls per day for the whole service. 0 = unlimited. */
+  RECOGNITION_DAILY_BUDGET: z.coerce.number().int().min(0).default(300),
   API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().default(240),
 });
 

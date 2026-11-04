@@ -7,11 +7,22 @@ import { AppError } from '../lib/errors.js';
 
 const IdParam = z.object({ id: TrackIdSchema });
 
-export function registerUserRoutes(app: FastifyInstance, s: Services) {
+/** Made for Kids YouTube videos: no tracking or personalisation (YouTube Developer Policies III.E.4.j, COPPA). */
+const KIDS_NOTE = 'Для видео «Сделано для детей» AURIS не сохраняет действия и не строит рекомендации.';
+
+export function registerUserRoutes(app: FastifyInstance, s: Services, termsOk: Set<number>) {
   app.get('/api/me', async (req) => {
     const p = await s.store.getProfile(userId(req));
     if (!p) throw new AppError('NOT_FOUND', 'Профиль не найден', 404);
     return p;
+  });
+
+  // Terms of use + privacy policy (with YouTube ToS / Google Privacy Policy) — required before any feature.
+  app.post('/api/terms/accept', async (req) => {
+    const id = userId(req);
+    await s.store.acceptTerms(id);
+    termsOk.add(id);
+    return s.store.getProfile(id);
   });
 
   app.patch('/api/me/settings', async (req) => {
@@ -30,8 +41,10 @@ export function registerUserRoutes(app: FastifyInstance, s: Services) {
 
   app.delete('/api/me', async (req) => {
     const id = userId(req);
+    // Immediate erasure of everything AURIS stored (cascade). Data on YouTube itself is not affected.
     await s.store.deleteUser(id);
     s.wave.invalidate(id);
+    termsOk.delete(id);
     return { ok: true };
   });
 
@@ -53,6 +66,7 @@ export function registerUserRoutes(app: FastifyInstance, s: Services) {
     const id = userId(req);
     const e = PostEventSchema.parse(req.body);
     const [track] = await s.catalog.hydrate([e.trackId]);
+    if (track?.youtube?.madeForKids) return { ok: true, stored: false };
     await s.store.addEvent(id, {
       trackId: e.trackId,
       kind: e.kind,
@@ -76,6 +90,7 @@ export function registerUserRoutes(app: FastifyInstance, s: Services) {
   const feedback = async (uid: number, trackId: string, kind: 'like' | 'unlike' | 'dislike') => {
     const [track] = await s.catalog.hydrate([trackId]);
     if (!track) throw new AppError('NOT_FOUND', 'Трек не найден', 404);
+    if (track.youtube?.madeForKids && kind !== 'unlike') throw new AppError('BAD_REQUEST', KIDS_NOTE, 400);
     if (kind === 'like') await s.store.like(uid, trackId);
     if (kind === 'unlike') await s.store.unlike(uid, trackId);
     if (kind === 'dislike') await s.store.dislike(uid, trackId, track.artist.id);

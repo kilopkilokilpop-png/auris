@@ -1,7 +1,7 @@
 import type { Album, Artist, AudioQuality, Genre, QualityTier, Track } from '@auris/shared';
 import { classifyQuality, pickVariant } from '@auris/shared';
 import { fetchJson, TtlCache, UpstreamError } from '../../lib/http.js';
-import { stripPrefix, type DownloadDecision, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
+import { stripPrefix, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
 
 /**
  * Stub adapter for a future B2B licensed catalogue (Tuned Global, 7digital or similar).
@@ -10,8 +10,7 @@ import { stripPrefix, type DownloadDecision, type MusicProvider, type ProviderIn
  * vendor = a small translation service (or rewrite of `request`) that exposes that contract.
  * Nothing in UI, recommendations or bot changes.
  *
- * Downloads are enabled ONLY when LICENSED_DOWNLOADS_CONTRACTED=true (contract explicitly grants
- * download + sending to Telegram) AND the vendor marks the individual track `rights.download = true`.
+ * This version of AURIS has no downloads: only `rights.stream` / `rights.preview` are used.
  */
 const P = 'licensed';
 
@@ -28,7 +27,7 @@ export interface LxTrack {
   popularity?: number;
   variants: LxVariant[];
   /** Rights granted for this track in this territory. */
-  rights: { stream: boolean; preview: boolean; download: boolean; fileIdCache?: boolean };
+  rights: { stream: boolean; preview: boolean };
   previewSec?: number;
   licenseLabel?: string;
 }
@@ -38,7 +37,7 @@ export class LicensedProvider implements MusicProvider {
   private cache = new TtlCache<unknown>(5 * 60_000);
 
   constructor(
-    private readonly cfg: { url?: string; key?: string; downloadsContracted: boolean; cacheFileId: boolean },
+    private readonly cfg: { url?: string; key?: string },
     private readonly fetcher: typeof fetchJson = fetchJson,
   ) {
     this.info = {
@@ -46,7 +45,6 @@ export class LicensedProvider implements MusicProvider {
       name: 'Лицензионный каталог',
       fullStreams: true,
       previewsOnly: false,
-      downloads: cfg.downloadsContracted,
       notice: cfg.url ? 'Лицензионный каталог партнёра.' : 'Лицензионный каталог ещё не подключён.',
       maxTier: 'hires',
     };
@@ -70,7 +68,6 @@ export class LicensedProvider implements MusicProvider {
       : t.rights.preview
         ? { kind: 'preview', playableSec: t.previewSec ?? 30, qualities: qualities.filter((q) => !q.lossless).slice(0, 1), note: 'Правообладатель разрешил только превью' }
         : { kind: 'none', playableSec: 0, qualities: [], note: 'Нет прав на воспроизведение' };
-    const canDl = this.cfg.downloadsContracted && t.rights.download === true;
     return {
       id: `${P}:${t.id}`,
       provider: 'licensed',
@@ -85,8 +82,6 @@ export class LicensedProvider implements MusicProvider {
       isrc: t.isrc,
       playback,
       license: { name: t.licenseLabel ?? 'Лицензия партнёра' },
-      downloadable: canDl,
-      downloadNote: canDl ? undefined : 'Скачивание не предусмотрено договором',
     };
   }
 
@@ -136,30 +131,11 @@ export class LicensedProvider implements MusicProvider {
   }
   async getStream(id: string, tier: QualityTier): Promise<StreamSource | null> {
     const track = await this.getTrack(id);
-    if (track.playback.kind === 'none') return null;
+    if (track.playback.kind !== 'full' && track.playback.kind !== 'preview') return null;
     const v = pickVariant(track.playback.qualities, tier);
     if (!v) return null;
     const r = await this.request<{ url: string; mime: string }>(`/v1/tracks/${encodeURIComponent(stripPrefix(id, P))}/stream?codec=${v.codec}&tier=${v.tier}`);
     return { url: r.url, mime: r.mime, kind: track.playback.kind, playableSec: track.playback.playableSec, tier: v.tier };
-  }
-  async getDownload(id: string): Promise<DownloadDecision> {
-    if (!this.cfg.downloadsContracted) {
-      return { allowed: false, code: 'not_contracted', reason: 'Договор с правообладателем не разрешает скачивание' };
-    }
-    let t: LxTrack;
-    try {
-      t = await this.request<LxTrack>(`/v1/tracks/${encodeURIComponent(stripPrefix(id, P))}`);
-    } catch {
-      return { allowed: false, code: 'rights_unknown', reason: 'Не удалось подтвердить права на трек' };
-    }
-    if (t.rights.download !== true) return { allowed: false, code: 'license_forbids', reason: 'Лицензия трека не разрешает скачивание' };
-    const f = await this.request<{ url: string; mime: 'audio/mpeg' | 'audio/mp4'; sizeBytes?: number }>(`/v1/tracks/${encodeURIComponent(t.id)}/download`);
-    return {
-      allowed: true,
-      source: { url: f.url, mime: f.mime, sizeBytes: f.sizeBytes, filename: `${t.artist.name} — ${t.title}.${f.mime === 'audio/mp4' ? 'm4a' : 'mp3'}` },
-      cacheFileId: this.cfg.cacheFileId && t.rights.fileIdCache === true,
-      attribution: `${t.artist.name} — ${t.title}`,
-    };
   }
   async match(hint: RecognizedHint) {
     if (!hint.isrc) return null;

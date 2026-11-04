@@ -12,6 +12,7 @@
   "dependencies": {
     "@auris/api": "workspace:*",
     "@auris/bot": "workspace:*",
+    "@auris/shared": "workspace:*",
     "@fastify/static": "10.1.8",
     "grammy": "1.46.0"
   },

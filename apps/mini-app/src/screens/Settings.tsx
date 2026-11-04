@@ -8,12 +8,15 @@ import { refreshProfile, session, setQuality } from '../lib/session';
 import { useStore } from '../lib/store';
 import { tg } from '../lib/telegram';
 import { openSheet, toast } from '../lib/ui';
+import { GOOGLE_PRIVACY, YOUTUBE_TERMS } from './Legal';
 import { BackButtonInline } from './Search';
 
 export function Settings() {
   const p = useStore(session, (s) => s.profile);
   const caps = useStore(session, (s) => s.capabilities);
   const [busy, setBusy] = useState(false);
+  // The switcher appears only when the connected sources really offer more than one quality.
+  const qualityChoice = (caps?.qualities.filter((q) => q.available).length ?? 0) > 1;
 
   const reset = () =>
     openSheet({
@@ -34,7 +37,7 @@ export function Settings() {
     openSheet({
       kind: 'info',
       title: 'Удалить все данные?',
-      body: 'Удалим профиль, избранное, плейлисты, историю, найденные через Слух треки и историю скачиваний. Это нельзя отменить.',
+      body: 'Удалим сразу: профиль, избранное, плейлисты, историю прослушиваний, настройки Резонанса и найденные через Слух песни. Это нельзя отменить. Ваш аккаунт и данные на YouTube это не затрагивает.',
       action: {
         label: 'Удалить навсегда',
         run: async () => {
@@ -45,8 +48,8 @@ export function Settings() {
             tg.haptic.success();
             session.set({ liked: new Set() });
             toast('Данные удалены');
-            go.back();
-            await refreshProfile();
+            // Start over: the consent screen is shown again.
+            setTimeout(() => location.reload(), 900);
           } finally {
             setBusy(false);
           }
@@ -61,6 +64,8 @@ export function Settings() {
         <h1 className="h-display">Настройки</h1>
       </div>
 
+      {qualityChoice ? (
+        <>
       <h2 className="label" style={{ marginTop: 8 }}>
         Качество звука
       </h2>
@@ -77,8 +82,10 @@ export function Settings() {
         />
       </div>
       <p className="note" style={{ marginTop: 10 }}>
-        Бейджи FLAC и Hi-Res показываются только если источник отдаёт такой файл. Для превью качество не указывается.
+        Бейджи FLAC и Hi-Res показываются только если источник отдаёт такой файл. Для YouTube качество не указывается.
       </p>
+        </>
+      ) : null}
 
       <h2 className="label" style={{ marginTop: 28 }}>
         Источники музыки
@@ -95,10 +102,10 @@ export function Settings() {
       </div>
 
       <h2 className="label" style={{ marginTop: 28 }}>
-        Фоновое воспроизведение
+        Воспроизведение
       </h2>
       <p className="note" style={{ marginTop: 10 }}>
-        Mini App работает внутри Telegram. Когда вы сворачиваете Telegram или блокируете экран, система может приостановить звук — это зависит от устройства и версии Telegram. Для музыки офлайн скачайте разрешённые треки в Telegram.
+        Видео YouTube играют только в официальном плеере YouTube, пока он открыт на экране: свернёте плеер или Telegram — воспроизведение остановится. Треки Jamendo продолжают играть в мини-плеере. Скачивания и офлайн-режима в AURIS нет.
       </p>
 
       <h2 className="label" style={{ marginTop: 28 }}>
@@ -119,8 +126,35 @@ export function Settings() {
         </button>
       </div>
       <p className="note" style={{ marginTop: 16 }}>
-        AURIS хранит ваш Telegram ID, лайки, прослушивания, плейлисты и найденные песни, чтобы улучшать рекомендации. Записи для Слуха удаляются сразу после распознавания. О скачиваниях хранится только факт: трек, время и источник.
+        AURIS хранит ваш Telegram ID, лайки, прослушивания, плейлисты и найденные песни — только чтобы строить рекомендации. Записи для Слуха удаляются сразу после распознавания. Сведения о видео YouTube обновляются или удаляются не реже чем раз в 30 дней. Удаление стирает данные сразу; данные на YouTube и в аккаунте Google оно не затрагивает.
       </p>
+
+      <h2 className="label" style={{ marginTop: 28 }}>
+        Документы
+      </h2>
+      <div className="group glass" style={{ marginTop: 12 }}>
+        <button type="button" className="group-item" onClick={() => go.push({ name: 'legal', page: 'terms' })}>
+          <span className="grow">
+            <b>Условия использования AURIS</b>
+          </span>
+        </button>
+        <button type="button" className="group-item" onClick={() => go.push({ name: 'legal', page: 'privacy' })}>
+          <span className="grow">
+            <b>Политика конфиденциальности AURIS</b>
+          </span>
+        </button>
+        <a className="group-item" href={YOUTUBE_TERMS} target="_blank" rel="noopener">
+          <span className="grow">
+            <b>Условия использования YouTube ↗</b>
+            <small>Пользуясь AURIS, вы соглашаетесь с ними</small>
+          </span>
+        </a>
+        <a className="group-item" href={GOOGLE_PRIVACY} target="_blank" rel="noopener">
+          <span className="grow">
+            <b>Политика конфиденциальности Google ↗</b>
+          </span>
+        </a>
+      </div>
       <p className="note center" style={{ marginTop: 24 }}>
         AURIS · Слышать каждую ноту
       </p>

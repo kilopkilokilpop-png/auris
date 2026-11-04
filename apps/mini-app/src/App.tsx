@@ -17,15 +17,18 @@ import { Onboarding } from './screens/Onboarding';
 import { Player } from './screens/Player';
 import { Profile } from './screens/Profile';
 import { Search } from './screens/Search';
+import { Consent, Legal } from './screens/Legal';
 import { Settings } from './screens/Settings';
 import { Wave } from './screens/Wave';
 
-type Boot = { k: 'loading' } | { k: 'ready' } | { k: 'error'; title: string; text: string };
+type Boot = { k: 'loading' } | { k: 'consent' } | { k: 'ready' } | { k: 'error'; title: string; text: string };
 
 function OverlayView({ o }: { o: Overlay }) {
   switch (o.name) {
     case 'search':
-      return <Search />;
+      return <Search initialQ={o.q} source={o.source} />;
+    case 'legal':
+      return <Legal page={o.page} />;
     case 'settings':
       return <Settings />;
     case 'album':
@@ -48,7 +51,7 @@ async function applyDeepLink() {
   const screen = p.get('screen') ?? (start && !start.startsWith('track_') && !start.startsWith('pl_') ? start : null);
   if (screen === 'wave' || screen === 'hear' || screen === 'profile') go.tab(screen);
   if (screen === 'settings') go.push({ name: 'settings' });
-  if (screen === 'search') go.push({ name: 'search' });
+  if (screen === 'search') go.push({ name: 'search', q: p.get('q')?.slice(0, 120) ?? undefined, source: p.get('source') === 'youtube' ? 'youtube' : undefined });
   // Shared playlist invite: ?join=<token> (bot button) or start_param pl_<token> (t.me/<bot>/app?startapp=…)
   const join = p.get('join') ?? (start?.startsWith('pl_') ? start.slice(3) : null);
   if (join && /^[A-Za-z0-9_-]{8,64}$/.test(join)) {
@@ -74,7 +77,11 @@ async function applyDeepLink() {
     const t = await api.track(trackId).catch(() => null);
     if (t) {
       // Opening from the bot is not a user gesture inside the WebView: show the player, play on tap.
-      player.store.set({ queue: [t], index: 0, context: { label: 'Из бота', kind: 'list' }, expanded: true, position: 0, duration: t.playback.playableSec, streamKind: t.playback.kind === 'none' ? null : t.playback.kind });
+      player.store.set({
+        queue: [t], index: 0, context: { label: 'Из бота', kind: 'list' }, expanded: true, position: 0, duration: t.playback.playableSec,
+        embed: t.playback.kind === 'embed', embedWantsPlay: 0,
+        streamKind: t.playback.kind === 'full' || t.playback.kind === 'preview' ? t.playback.kind : null,
+      });
     }
   }
 }
@@ -84,13 +91,14 @@ export function App({ bootError }: { bootError?: string }) {
   const tab = useStore(nav, (s) => s.tab);
   const stack = useStore(nav, (s) => s.stack);
   const expanded = useStore(player.store, (s) => s.expanded);
-  const hasTrack = useStore(player.store, (s) => s.index >= 0 && s.queue.length > 0);
+  const hasTrack = useStore(player.store, (s) => s.index >= 0 && s.queue.length > 0 && s.queue[s.index]?.playback.kind !== 'embed');
   useTelegramBackButton();
 
   useEffect(() => {
     if (bootError) return;
     loadSession()
-      .then(() => {
+      .then((p) => {
+        if (!p.termsAccepted) return setBoot({ k: 'consent' });
         setBoot({ k: 'ready' });
         void applyDeepLink();
       })
@@ -100,6 +108,18 @@ export function App({ bootError }: { bootError?: string }) {
       });
   }, [bootError]);
 
+  if (boot.k === 'consent') {
+    return (
+      <div className="app">
+        <Consent
+          onDone={() => {
+            setBoot({ k: 'ready' });
+            void applyDeepLink();
+          }}
+        />
+      </div>
+    );
+  }
   if (boot.k !== 'ready') {
     return (
       <div className="app" style={{ display: 'grid', placeItems: 'center', padding: 24 }}>

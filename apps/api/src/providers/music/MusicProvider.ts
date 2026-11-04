@@ -12,30 +12,16 @@ export interface StreamSource {
   tier: QualityTier;
 }
 
-export type DownloadDenyCode =
-  | 'provider_forbids' // provider terms do not allow downloads at all (Deezer)
-  | 'license_forbids' // this track's license / artist setting forbids it
-  | 'rights_unknown' // we cannot confirm rights -> deny by default
-  | 'not_contracted' // B2B provider without the contract flag
-  | 'not_found';
-
-export type DownloadDecision =
-  | {
-      allowed: true;
-      source: { url?: string; filePath?: string; mime: 'audio/mpeg' | 'audio/mp4'; filename: string; sizeBytes?: number };
-      /** May the Telegram file_id be cached and reused for this track? */
-      cacheFileId: boolean;
-      /** Caption lines with attribution required by the license. */
-      attribution: string;
-    }
-  | { allowed: false; code: DownloadDenyCode; reason: string };
-
 export interface ProviderInfo {
   id: ProviderId;
   name: string;
   fullStreams: boolean;
   previewsOnly: boolean;
-  downloads: boolean;
+  /**
+   * Results must never be merged with other sources (YouTube Developer Policies III.C.5):
+   * the composite leaves this adapter out of merged lists; callers ask it explicitly.
+   */
+  separateResults?: boolean;
   /** Shown to users verbatim: what they get from this source. */
   notice: string;
   /** Best real tier the catalogue can deliver, with human summary. */
@@ -86,8 +72,6 @@ export interface MusicProvider {
 
   /** Server-side only. Returns null when the track cannot be played here. */
   getStream(id: string, tier: QualityTier): Promise<StreamSource | null>;
-  /** Decided per track, on the server, at request time. Unknown rights => deny. */
-  getDownload(id: string): Promise<DownloadDecision>;
   /** Map a recognition result to a playable catalogue track. */
   match(hint: RecognizedHint): Promise<Track | null>;
 }

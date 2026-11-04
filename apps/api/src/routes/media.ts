@@ -18,10 +18,12 @@ export function registerMediaRoutes(app: FastifyInstance, s: Services) {
     const track = await s.music.getTrack(id);
     if (!track) throw new AppError('NOT_FOUND', 'Трек не найден', 404);
     if (track.playback.kind === 'none') throw new AppError('NOT_FOUND', track.playback.note ?? 'Трек нельзя послушать в AURIS', 404);
+    // YouTube: only the official visible player, never an audio stream.
+    if (track.playback.kind === 'embed') throw new AppError('BAD_REQUEST', 'Этот трек играет только в плеере YouTube', 400);
     const { token, exp } = s.signer.sign({ t: id, q: quality, u: uid });
     return {
       url: `${s.env.PUBLIC_API_URL ?? ''}/api/stream/${token}`,
-      kind: track.playback.kind,
+      kind: track.playback.kind === 'preview' ? 'preview' : 'full',
       playableSec: track.playback.playableSec,
       qualityLine: playerQualityLine(track, quality),
       expiresAt: exp,

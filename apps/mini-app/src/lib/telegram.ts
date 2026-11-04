@@ -60,7 +60,7 @@ export async function bootTelegram(): Promise<TgState> {
   if (!inside && import.meta.env.DEV) {
     const params = new URLSearchParams(location.search);
     const q = new URLSearchParams();
-    if (params.get('master')) q.set('master', params.get('master')!);
+    if (params.get('terms')) q.set('terms', params.get('terms')!);
     if (params.get('uid')) q.set('id', params.get('uid')!);
     const res = await fetch(`/api/dev/init-data?${q}`).catch(() => null);
     if (res?.ok) {
@@ -135,6 +135,26 @@ export const tg = {
   get startParam() {
     return state.startParam;
   },
+  /**
+   * Called when the Mini App is minimised / goes to the background (Telegram "deactivated",
+   * "visibility_changed"), in addition to the page's own visibilitychange. Returns an unsubscribe.
+   */
+  onHidden(fn: () => void): () => void {
+    const offs: (() => void)[] = [];
+    const sub = on as unknown as (ev: string, cb: (p?: { is_visible?: boolean }) => void) => () => void;
+    for (const ev of ['deactivated', 'visibility_changed']) {
+      const off = safe(() => sub(ev, (p) => (ev === 'deactivated' || p?.is_visible === false) && fn()));
+      if (off) offs.push(off);
+    }
+    const doc = () => document.visibilityState !== 'visible' && fn();
+    document.addEventListener('visibilitychange', doc);
+    window.addEventListener('pagehide', fn);
+    return () => {
+      offs.forEach((o) => o());
+      document.removeEventListener('visibilitychange', doc);
+      window.removeEventListener('pagehide', fn);
+    };
+  },
   backButton: {
     show: () => safe(() => backButton.show()),
     hide: () => safe(() => backButton.hide()),
@@ -168,7 +188,7 @@ export const tg = {
     }
   },
   openBot(link?: string) {
-    const url = link ?? (state.botUsername ? `https://t.me/${state.botUsername}?start=download` : undefined);
+    const url = link ?? (state.botUsername ? `https://t.me/${state.botUsername}` : undefined);
     if (!url) return false;
     if (state.mode === 'telegram' && safe(() => openTelegramLink(url)) !== undefined) return true;
     window.open(url, '_blank', 'noopener');

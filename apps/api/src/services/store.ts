@@ -3,13 +3,16 @@ import type { TelegramUser } from '../auth/initData.js';
 import type { Db } from '../db/db.js';
 import type { Signal } from '../reco/scoring.js';
 
+/** Bump when the terms / privacy policy text changes: everyone is asked to accept again. */
+export const TERMS_VERSION = '2026-11-04';
+
 interface UserRow {
   id: number;
   first_name: string;
   last_name: string | null;
   username: string | null;
   photo_url: string | null;
-  is_master: boolean;
+  terms_version: string | null;
   bot_started: boolean;
   onboarded: boolean;
   quality: QualityTier;
@@ -67,7 +70,7 @@ export class Store {
 
   async getUserRow(id: number): Promise<UserRow | undefined> {
     const r = await this.db.query<UserRow>(
-      `SELECT u.id, u.first_name, u.last_name, u.username, u.photo_url, u.is_master, u.bot_started, u.onboarded,
+      `SELECT u.id, u.first_name, u.last_name, u.username, u.photo_url, u.terms_version, u.bot_started, u.onboarded,
               s.quality, s.wave_mood, s.wave_mode, s.onboarding_genres, s.onboarding_artists, u.language_code
        FROM users u JOIN user_settings s ON s.user_id = u.id WHERE u.id=$1`,
       [id],
@@ -89,7 +92,7 @@ export class Store {
       lastName: u.last_name ?? undefined,
       username: u.username ?? undefined,
       photoUrl: u.photo_url ?? undefined,
-      isMaster: u.is_master,
+      termsAccepted: u.terms_version === TERMS_VERSION,
       botStarted: u.bot_started,
       onboarded: u.onboarded,
       settings: { quality: u.quality, waveMood: u.wave_mood, waveMode: u.wave_mode },
@@ -111,6 +114,54 @@ export class Store {
   async setOnboarding(id: number, genres: string[], artists: string[]) {
     await this.db.query('UPDATE user_settings SET onboarding_genres=$2::jsonb, onboarding_artists=$3::jsonb WHERE user_id=$1', [id, JSON.stringify(genres), JSON.stringify(artists)]);
     await this.db.query('UPDATE users SET onboarded=TRUE WHERE id=$1', [id]);
+  }
+
+  async acceptTerms(id: number) {
+    await this.db.query('UPDATE users SET terms_version=$2, terms_accepted_at=now() WHERE id=$1', [id, TERMS_VERSION]);
+  }
+  async termsAccepted(id: number): Promise<boolean> {
+    const r = await this.db.query<{ v: string | null }>('SELECT terms_version AS v FROM users WHERE id=$1', [id]);
+    return r.rows[0]?.v === TERMS_VERSION;
+  }
+
+  /** Service-wide daily counter (spending caps). Returns the new value. */
+  async bumpService(kind: string): Promise<number> {
+    const r = await this.db.query<{ count: number }>(
+      `INSERT INTO service_usage (kind, day, count) VALUES ($1, CURRENT_DATE, 1)
+       ON CONFLICT (kind, day) DO UPDATE SET count = service_usage.count + 1 RETURNING count`,
+      [kind],
+    );
+    return r.rows[0]!.count;
+  }
+
+  // ---------- YouTube data retention (Developer Policies III.E.4: max 30 days) ----------
+  /** Track ids of a provider whose stored API data is older than `days`. */
+  async staleSnapshotIds(provider: string, days: number, limit = 500): Promise<string[]> {
+    const r = await this.db.query<{ track_id: string }>(
+      `SELECT track_id FROM track_snapshots WHERE split_part(track_id, ':', 1) = $1 AND updated_at < now() - make_interval(days => $2::int)
+       ORDER BY updated_at LIMIT $3`,
+      [provider, days, limit],
+    );
+    return r.rows.map((x) => x.track_id);
+  }
+  /** Ids referenced by user data (likes, playlists, history, Слух) that have no fresh snapshot. */
+  async referencedWithoutSnapshot(provider: string, limit = 500): Promise<string[]> {
+    const r = await this.db.query<{ id: string }>(
+      `SELECT id FROM (
+         SELECT track_id AS id FROM likes UNION SELECT track_id FROM playlist_tracks UNION SELECT track_id FROM events
+         UNION SELECT track_id FROM dislikes UNION SELECT matched_track_id FROM recognitions WHERE matched_track_id IS NOT NULL
+       ) x WHERE split_part(id, ':', 1) = $1 AND NOT EXISTS (SELECT 1 FROM track_snapshots s WHERE s.track_id = x.id) LIMIT $2`,
+      [provider, limit],
+    );
+    return r.rows.map((x) => x.id);
+  }
+  /** A video was deleted / made private / not embeddable any more: forget it everywhere. */
+  async forgetTracks(ids: string[]) {
+    if (!ids.length) return;
+    for (const t of ['track_snapshots', 'likes', 'dislikes', 'playlist_tracks', 'events']) {
+      await this.db.query(`DELETE FROM ${t} WHERE track_id = ANY($1::text[])`, [ids]);
+    }
+    await this.db.query('UPDATE recognitions SET matched_track_id=NULL WHERE matched_track_id = ANY($1::text[])', [ids]);
   }
 
   // ---------- track snapshots ----------
@@ -346,21 +397,6 @@ export class Store {
   }
   async unbumpUsage(userId: number, kind: string) {
     await this.db.query('UPDATE usage_counters SET count = GREATEST(0, count - 1) WHERE user_id=$1 AND kind=$2 AND day=CURRENT_DATE', [userId, kind]);
-  }
-
-  // ---------- downloads ----------
-  async recordDownload(userId: number, trackId: string, provider: string) {
-    await this.db.query('INSERT INTO downloads (user_id, track_id, provider) VALUES ($1,$2,$3)', [userId, trackId, provider]);
-  }
-  async cachedFileId(trackId: string): Promise<string | undefined> {
-    const r = await this.db.query<{ file_id: string }>('SELECT file_id FROM telegram_file_cache WHERE track_id=$1', [trackId]);
-    return r.rows[0]?.file_id;
-  }
-  async cacheFileId(trackId: string, provider: string, fileId: string) {
-    await this.db.query('INSERT INTO telegram_file_cache (track_id, provider, file_id) VALUES ($1,$2,$3) ON CONFLICT (track_id) DO UPDATE SET file_id=EXCLUDED.file_id', [trackId, provider, fileId]);
-  }
-  async dropFileId(trackId: string) {
-    await this.db.query('DELETE FROM telegram_file_cache WHERE track_id=$1', [trackId]);
   }
 
   // ---------- privacy ----------

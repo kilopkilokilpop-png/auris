@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import { webhookCallback } from 'grammy';
 import { createApi, loadEnv } from '@auris/api/server';
+import { MINI_APP_HEADERS } from '@auris/shared';
 import { HttpAurisApi } from '@auris/bot/api-client';
 import { configureBot, createBot } from '@auris/bot/bot';
 
@@ -39,12 +40,13 @@ await app.register(fastifyStatic, {
   wildcard: false,
   setHeaders: (res, file) => {
     void res.header('cache-control', file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache');
+    for (const [k, v] of Object.entries(MINI_APP_HEADERS)) void res.header(k, v);
   },
 });
 const indexHtml = fs.readFileSync(path.join(dist, 'index.html'));
 app.setNotFoundHandler((req, reply) => {
   if (req.method === 'GET' && !/^\/(api|internal|telegram)\//.test(req.url)) {
-    return reply.type('text/html').header('cache-control', 'no-cache').send(indexHtml);
+    return reply.type('text/html').header('cache-control', 'no-cache').headers(MINI_APP_HEADERS).send(indexHtml);
   }
   return reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Not found' } });
 });

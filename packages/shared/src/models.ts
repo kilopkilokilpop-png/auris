@@ -11,7 +11,7 @@ export const TrackIdSchema = z
   .regex(/^[a-z0-9]+:[A-Za-z0-9_.-]+$/, 'invalid id');
 export type TrackId = z.infer<typeof TrackIdSchema>;
 
-export const ProviderIdSchema = z.enum(['mock', 'deezer', 'jamendo', 'audius', 'licensed']);
+export const ProviderIdSchema = z.enum(['mock', 'youtube', 'deezer', 'jamendo', 'audius', 'licensed']);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 /** One real, measured or provider-declared audio variant. Never inferred. */
@@ -27,8 +27,11 @@ export const AudioQualitySchema = z.object({
 export type AudioQuality = z.infer<typeof AudioQualitySchema>;
 
 export const PlaybackSchema = z.object({
-  /** full = whole recording, preview = provider-limited clip, none = cannot be played here */
-  kind: z.enum(['full', 'preview', 'none']),
+  /**
+   * full = whole recording (audio stream), preview = provider-limited clip,
+   * embed = only inside the provider's own visible player (YouTube IFrame Player), none = cannot be played here
+   */
+  kind: z.enum(['full', 'preview', 'embed', 'none']),
   /** Length of what we can actually play, seconds. */
   playableSec: z.number().nonnegative(),
   /** Available real variants. Empty for kind = none. */
@@ -66,9 +69,18 @@ export const TrackSchema = z.object({
   explicit: z.boolean().optional(),
   playback: PlaybackSchema,
   license: LicenseSchema,
-  /** Coarse hint for UI; the server re-decides on every download request. */
-  downloadable: z.boolean(),
-  downloadNote: z.string().optional(),
+  /** YouTube API data, shown unchanged. Present only for provider = youtube. */
+  youtube: z
+    .object({
+      videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
+      channelId: z.string(),
+      channelTitle: z.string(),
+      /** status.madeForKids: tracking off, privacy-enhanced player, no personalisation. */
+      madeForKids: z.boolean(),
+      /** ISO time the data was fetched from the API (max age 30 days). */
+      fetchedAt: z.string(),
+    })
+    .optional(),
 });
 export type Track = z.infer<typeof TrackSchema>;
 
@@ -129,7 +141,8 @@ export const UserProfileSchema = z.object({
   lastName: z.string().optional(),
   username: z.string().optional(),
   photoUrl: z.string().optional(),
-  isMaster: z.boolean(),
+  /** Current terms of use + privacy policy accepted (required before any feature). */
+  termsAccepted: z.boolean(),
   botStarted: z.boolean(),
   onboarded: z.boolean(),
   settings: z.object({
@@ -196,7 +209,6 @@ export const CatalogCapabilitiesSchema = z.object({
       name: z.string(),
       fullStreams: z.boolean(),
       previewsOnly: z.boolean(),
-      downloads: z.boolean(),
       notice: z.string(),
     }),
   ),

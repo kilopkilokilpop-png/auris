@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Recognition } from '@auris/shared';
 import { Cover } from '../components/Cover';
-import { IconDownload, IconHeart, IconPlay, IconSend, LogoMark } from '../components/Icons';
+import { IconHeart, IconPlay, IconSearch, IconSend, LogoMark } from '../components/Icons';
+import { SOURCE_NAMES } from '../components/Source';
 import { Empty, ErrorState, SkeletonRows } from '../components/States';
 import { api, ApiFailure } from '../lib/api';
 import { player } from '../lib/player';
-import { downloadExplanation, downloadToTelegram, session, toggleLike } from '../lib/session';
+import { go } from '../lib/router';
+import { session, toggleLike } from '../lib/session';
 import { useQuery, useStore } from '../lib/store';
 import { tg } from '../lib/telegram';
 import { canRecord, recordClip, type RecordError } from '../lib/recorder';
@@ -196,24 +198,26 @@ function ResultCard({ r, onAgain, liked }: { r: Recognition; onAgain: () => void
           </p>
         </div>
       </div>
-      {r.unavailableReason ? <p className="notice">{r.unavailableReason}</p> : null}
+      {r.unavailableReason && r.track ? <p className="notice">{r.unavailableReason}</p> : null}
       <div className="actions">
+        {/* Never starts playback by itself: opens YouTube search results, the user picks a video. */}
+        <button type="button" className="btn primary block" onClick={() => go.push({ name: 'search', q: `${r.artist} ${r.title}`.slice(0, 120), source: 'youtube' })}>
+          <IconSearch style={{ width: 18, height: 18 }} /> Найти на YouTube
+        </button>
         {playable ? (
-          <button type="button" className="btn primary block" onClick={() => player.playList([t], 0, { label: 'Слух', kind: 'list' })}>
-            <IconPlay style={{ width: 18, height: 18 }} /> {t.playback.kind === 'preview' ? 'Слушать превью 30 с' : 'Слушать'}
+          <button type="button" className="btn ghost block" onClick={() => player.playList([t], 0, { label: 'Слух', kind: 'list' })}>
+            <IconPlay style={{ width: 18, height: 18 }} /> {t.playback.kind === 'preview' ? 'Слушать превью 30 с' : `Слушать в AURIS · ${SOURCE_NAMES[t.provider] ?? t.provider}`}
           </button>
         ) : null}
-        {t ? (
+        {t && !t.youtube?.madeForKids ? (
           <button type="button" className="btn ghost block" aria-pressed={liked} onClick={() => void toggleLike(t)}>
             <IconHeart filled={liked} style={{ width: 18, height: 18 }} /> {liked ? 'В избранном' : 'В избранное'}
           </button>
-        ) : null}
-        {t ? (
-          <button type="button" className="btn ghost block" aria-disabled={!t.downloadable || undefined} onClick={() => void downloadToTelegram(t)}>
-            <IconDownload style={{ width: 18, height: 18 }} /> Скачать в Telegram
-          </button>
-        ) : null}
-        {t && !t.downloadable ? <p className="note center" style={{ margin: 0 }}>{downloadExplanation(t)}</p> : null}
+        ) : (
+          <p className="note center" style={{ margin: 0 }}>
+            Этого трека нет в каталогах AURIS, поэтому в избранное его не добавить. Найдите его на YouTube и нажмите ♥ в плеере.
+          </p>
+        )}
         <button type="button" className="btn ghost block" onClick={onAgain}>
           Распознать ещё
         </button>

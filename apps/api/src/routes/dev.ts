@@ -13,11 +13,12 @@ export const DEV_BOT_TOKEN = '0:AURIS-DEV-ONLY-TOKEN';
 export function registerDevRoutes(app: FastifyInstance, s: Services) {
   app.get('/api/dev/init-data', async (req) => {
     const q = z
-      .object({ id: z.coerce.number().int().positive().default(100_001), name: z.string().max(32).default('Алекс'), last: z.string().max(32).default('Морозов'), master: z.enum(['0', '1']).optional() })
+      .object({ id: z.coerce.number().int().positive().default(100_001), name: z.string().max(32).default('Алекс'), last: z.string().max(32).default('Морозов'), terms: z.enum(['0', '1']).optional() })
       .parse(req.query);
     const user = { id: q.id, first_name: q.name, last_name: q.last, username: 'auris_demo', language_code: 'ru' };
     await s.store.upsertUser(user);
-    if (q.master) await s.store.db.query('UPDATE users SET is_master=$2 WHERE id=$1', [q.id, q.master === '1']);
+    // Tests / screenshots only: pre-accept the terms. The normal dev flow shows the consent screen.
+    if (q.terms === '1') await s.store.acceptTerms(q.id);
     return { initData: signInitData(user, s.env.BOT_TOKEN ?? DEV_BOT_TOKEN), botUsername: s.env.BOT_USERNAME ?? null };
   });
 }

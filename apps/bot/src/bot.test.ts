@@ -2,19 +2,19 @@ import { describe, expect, it } from 'vitest';
 import type { Update } from 'grammy/types';
 import type { Recognition, Track } from '@auris/shared';
 import type { AurisApi } from './api-client.js';
-import { ApiCallError } from './api-client.js';
+
 import { appUrl, createBot, recognitionMessage, trackKeyboard } from './bot.js';
 
-const track = (id: string, downloadable: boolean, kind: 'full' | 'preview' = 'full'): Track => ({
+const track = (id: string, kind: 'full' | 'preview' = 'full'): Track => ({
   id, provider: 'mock', title: 'Песня ' + id, artist: { id: 'mock:a', name: 'Артист' }, durationSec: 200, genres: [], tags: [], popularity: 0.5,
-  playback: { kind, playableSec: kind === 'preview' ? 30 : 200, qualities: [] }, license: { name: 'CC0' }, downloadable,
+  playback: { kind, playableSec: kind === 'preview' ? 30 : 200, qualities: [] }, license: { name: 'CC0' },
 });
 
 function harness(api: Partial<AurisApi> = {}) {
   const calls: { method: string; payload: Record<string, unknown> }[] = [];
   const fake: AurisApi = {
-    touchUser: async () => {}, search: async () => [track('mock:t1', true), track('deezer:1', false, 'preview')], liked: async () => [],
-    like: async () => {}, download: async () => ({ status: 'sent' }), recognize: async () => { throw new Error('x'); },
+    touchUser: async () => {}, liked: async () => [track('mock:t1'), track('deezer:1', 'preview')], termsAccepted: async () => true, acceptTerms: async () => {},
+    like: async () => {}, recognize: async () => { throw new Error('x'); },
     resetRecommendations: async () => {}, deleteUser: async () => {},
     playlistInvite: async (t: string) => (t === 'goodtoken123' ? { title: 'Дорога', owner: 'Аня', trackCount: 4 } : null), ...api,
   };
@@ -34,6 +34,19 @@ function harness(api: Partial<AurisApi> = {}) {
 }
 
 describe('bot', () => {
+  it('/start asks a new user to accept the terms (AURIS + YouTube ToS + Google Privacy) first', async () => {
+    const accepted: number[] = [];
+    const h = harness({ termsAccepted: async () => false, acceptTerms: async (id) => { accepted.push(id); } });
+    await h.bot.handleUpdate(h.text('/start'));
+    const text = String(h.calls[0]!.payload.text);
+    expect(text).toContain('https://www.youtube.com/t/terms');
+    expect(text).toContain('https://policies.google.com/privacy');
+    expect(text).toContain('https://app.auris.test/privacy.html');
+    expect(JSON.stringify(h.calls[0]!.payload.reply_markup)).not.toContain('web_app');
+    await h.bot.handleUpdate(h.cb('terms!'));
+    expect(accepted).toEqual([5]);
+    expect(JSON.stringify(h.calls.at(-1)!.payload.reply_markup)).toContain('web_app');
+  });
   it('/start replies with a Mini App button', async () => {
     const h = harness();
     await h.bot.handleUpdate(h.text('/start'));
@@ -54,21 +67,21 @@ describe('bot', () => {
     await h.bot.handleUpdate(h.text('/wave'));
     expect(JSON.stringify(h.calls[0]!.payload)).toContain('screen=wave');
   });
-  it('/search lists results and only offers download where allowed', async () => {
+  it('/search opens the Mini App with the results instead of sending anything', async () => {
     const h = harness();
     await h.bot.handleUpdate(h.text('/search ночь'));
-    const p = h.calls[0]!.payload;
-    expect(p.text).toContain('превью 30 с');
-    const flat = JSON.stringify(p.reply_markup);
-    expect(flat).toContain('dl:mock:t1');
-    expect(flat).toContain('nodl:deezer:1');
-    expect(flat).not.toContain('"dl:deezer:1"');
+    const flat = JSON.stringify(h.calls[0]!.payload.reply_markup);
+    expect(flat).toContain('screen=search');
+    expect(flat).toContain('q=%D0%BD%D0%BE%D1%87%D1%8C');
   });
-  it('download callback reports refusals', async () => {
-    const h = harness({ download: async () => { throw new ApiCallError('DOWNLOAD_FORBIDDEN', 'Условия Deezer API запрещают скачивание треков'); } });
-    await h.bot.handleUpdate(h.cb('dl:deezer:1'));
-    expect(h.calls.map((c) => c.method)).toEqual(['answerCallbackQuery', 'sendMessage']);
-    expect(String(h.calls[1]!.payload.text)).toContain('Deezer');
+  it('/liked lists favourites with open buttons and no download buttons', async () => {
+    const h = harness();
+    await h.bot.handleUpdate(h.text('/liked'));
+    expect(String(h.calls[0]!.payload.text)).toContain('превью 30 с');
+    const flat = JSON.stringify(h.calls[0]!.payload.reply_markup);
+    expect(flat).toContain('track=mock%3At1');
+    expect(flat).not.toMatch(/dl:|Скачать/);
+    expect(h.calls.some((c) => c.method === 'sendAudio' || c.method === 'sendDocument')).toBe(false);
   });
   it('/settings offers reset and delete with confirmation', async () => {
     const deleted: number[] = [];
@@ -91,14 +104,17 @@ describe('formatting', () => {
   it('builds app urls', () => {
     expect(appUrl('https://a.test/app', { track: 'mock:t1' })).toBe('https://a.test/app?track=mock%3At1');
   });
-  it('recognition without a catalogue match says so and has no play button', () => {
-    const r: Recognition = { id: '1', title: 'X', artist: 'Y', source: 'bot', createdAt: '', unavailableReason: 'Этого трека нет в каталоге AURIS' };
+  it('recognition offers "Найти на YouTube" (never autoplays) and "В избранное" for catalogue matches', () => {
+    const r: Recognition = { id: '1', title: 'X', artist: 'Y', source: 'bot', createdAt: '' };
     const m = recognitionMessage(r, 'https://a.test');
-    expect(m.text).toContain('нет в каталоге');
-    expect(m.keyboard.inline_keyboard.flat()).toHaveLength(0);
+    const flat = m.keyboard.inline_keyboard.flat();
+    expect(flat.map((b) => b.text)).toEqual(['Найти на YouTube']);
+    expect(JSON.stringify(flat)).toContain('source=youtube');
+    const withTrack = recognitionMessage({ ...r, track: track('mock:t1') }, 'https://a.test').keyboard.inline_keyboard.flat().map((b) => b.text);
+    expect(withTrack).toEqual(['Найти на YouTube', '▶ Слушать в AURIS', '♥ В избранное']);
   });
   it('keyboard rows', () => {
-    expect(trackKeyboard([track('mock:t1', true)], 'http://localhost').inline_keyboard[0]).toHaveLength(3);
+    expect(trackKeyboard([track('mock:t1')], 'http://localhost').inline_keyboard[0]).toHaveLength(1);
   });
 });
 

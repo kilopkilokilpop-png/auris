@@ -60,7 +60,7 @@ export function Profile() {
         </span>
         <div style={{ minWidth: 0 }}>
           <h2 className="user-name">{name || 'Слушатель'}</h2>
-          {p?.isMaster ? <span className="master">AURIS MASTER</span> : p?.username ? <p className="muted" style={{ margin: '4px 0 0', fontSize: 14 }}>@{p.username}</p> : null}
+          {p?.username ? <p className="muted" style={{ margin: '4px 0 0', fontSize: 14 }}>@{p.username}</p> : null}
         </div>
       </section>
 
@@ -75,7 +75,7 @@ export function Profile() {
         </div>
         <div className="stat glass">
           <b>{p ? `${fmtHours(p.stats.listenedHours)} ч` : '—'}</b>
-          <span>прослушано</span>
+          <span>прослушано в AURIS</span>
         </div>
       </div>
 
@@ -189,14 +189,18 @@ export function Profile() {
                   <button
                     type="button"
                     className="row-main"
-                    onClick={() => (r.track && r.track.playback.kind !== 'none' ? player.playList([r.track], 0, { label: 'Слух', kind: 'list' }) : go.tab('hear'))}
+                    onClick={() =>
+                      r.track && r.track.playback.kind !== 'none'
+                        ? player.playList([r.track], 0, { label: 'Слух', kind: 'list' })
+                        : go.push({ name: 'search', q: `${r.artist} ${r.title}`.slice(0, 120), source: 'youtube' })
+                    }
                   >
                     <Cover src={r.coverUrl ?? r.track?.coverUrl} />
                     <span className="row-text">
                       <span className="row-title" style={{ display: 'block' }}>{r.title}</span>
                       <span className="row-sub" style={{ display: 'block' }}>
                         {r.artist}
-                        {r.track ? '' : ' · нет в каталоге'}
+                        {r.track ? '' : ' · найти на YouTube'}
                       </span>
                     </span>
                   </button>

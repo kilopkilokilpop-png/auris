@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { SearchQuerySchema, TrackIdSchema, type CatalogCapabilities, type Collection, type QualityTier, type Track } from '@auris/shared';
+import { SearchQuerySchema, TrackIdSchema, type CatalogCapabilities, type Collection, type QualityTier, type SearchSection, type Track } from '@auris/shared';
 import { MOOD_KEYWORDS } from '../reco/weights.js';
 import { isCompilation } from '../providers/music/AudiusProvider.js';
+import { YouTubeQuotaError } from '../providers/music/YouTubeProvider.js';
 import { userId, type Services } from '../app.js';
 import { AppError } from '../lib/errors.js';
 
@@ -11,11 +12,13 @@ const TIERS: QualityTier[] = ['standard', 'hifi', 'hires'];
 const PAGE = 30;
 
 export function capabilities(s: Services): CatalogCapabilities {
-  const infos = s.music.providers.map((p) => p.info);
+  // Quality is reported only by sources with real audio data (never YouTube).
+  const infos = s.music.mergeable.map((p) => p.info);
+  if (!infos.length) return { providers: s.music.providers.map((p) => ({ id: p.info.id, name: p.info.name, fullStreams: p.info.fullStreams, previewsOnly: p.info.previewsOnly, notice: p.info.notice })), qualities: [] };
   const best = Math.max(...infos.map((i) => TIERS.indexOf(i.maxTier)));
   const summary = (tier: QualityTier) => infos.map((i) => i.tiers?.[tier]).find(Boolean);
   return {
-    providers: infos.map((i) => ({ id: i.id, name: i.name, fullStreams: i.fullStreams, previewsOnly: i.previewsOnly, downloads: i.downloads, notice: i.notice })),
+    providers: s.music.providers.map((p) => p.info).map((i) => ({ id: i.id, name: i.name, fullStreams: i.fullStreams, previewsOnly: i.previewsOnly, notice: i.notice })),
     qualities: TIERS.map((tier, idx) => ({
       tier,
       available: idx <= best,
@@ -90,13 +93,28 @@ export function registerCatalogRoutes(app: FastifyInstance, s: Services) {
     return { editorial, recent, capabilities: capabilities(s) };
   });
 
+  /**
+   * One section per source. YouTube is its own section with its own attribution and is never
+   * merged into other results; a missing key or exhausted quota becomes a readable notice.
+   */
   app.get('/api/search', async (req) => {
     const uid = userId(req);
     const q = SearchQuerySchema.parse(req.query);
-    const r = await s.music.search(q.q, { type: q.type, limit: 20 });
+    const sections = await Promise.all(
+      s.music.providers.map(async (p): Promise<SearchSection> => {
+        const base = { provider: p.info.id, name: p.info.name, tracks: [], artists: [], albums: [] };
+        try {
+          const r = await p.search(q.q, { type: q.type, limit: p.info.id === 'youtube' ? 10 : 20 });
+          return { ...base, ...r, tracks: r.tracks.filter((t) => t.playback.kind !== 'none') };
+        } catch (e) {
+          if (e instanceof YouTubeQuotaError) return { ...base, notice: 'Лимит запросов к YouTube на сегодня исчерпан. Попробуйте завтра — остальные источники работают.' };
+          return { ...base, notice: `${p.info.name} сейчас не отвечает. Попробуйте позже.` };
+        }
+      }),
+    );
     if (q.q.length >= 2) await s.store.addRecentSearch(uid, q.q);
-    void s.store.saveSnapshots(r.tracks).catch(() => {});
-    return r;
+    void s.store.saveSnapshots(sections.flatMap((x) => x.tracks)).catch(() => {});
+    return { sections };
   });
   app.get('/api/search/recent', async (req) => ({ queries: await s.store.recentSearches(userId(req)) }));
   app.delete('/api/search/recent', async (req) => {

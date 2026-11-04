@@ -32,6 +32,7 @@ const canWebApp = (url: string) => url.startsWith('https://');
 function availability(t: Track): string {
   if (t.playback.kind === 'preview') return `превью ${Math.round(t.playback.playableSec)} с`;
   if (t.playback.kind === 'none') return 'нельзя послушать';
+  if (t.playback.kind === 'embed') return `YouTube · ${formatDuration(t.durationSec)}`;
   return formatDuration(t.durationSec);
 }
 
@@ -45,9 +46,6 @@ export function trackKeyboard(tracks: Track[], miniAppUrl: string): InlineKeyboa
     const label = `${i + 1}. ${t.title}`.slice(0, 40);
     if (canWebApp(miniAppUrl)) kb.webApp(`▶ ${label}`, appUrl(miniAppUrl, { track: t.id }));
     else kb.text(`▶ ${label}`, `noop`);
-    kb.text('♥', `like:${t.id}`);
-    // Download button only when the provider + licence allow it; otherwise a short explanation.
-    kb.text(t.downloadable ? '⬇' : '🚫', t.downloadable ? `dl:${t.id}` : `nodl:${t.id}`);
     kb.row();
   });
   return kb;
@@ -58,19 +56,37 @@ function openKeyboard(miniAppUrl: string, text: string, params: Record<string, s
   return canWebApp(miniAppUrl) ? new InlineKeyboard().webApp(text, appUrl(miniAppUrl, params)) : new InlineKeyboard().text(text, 'noapp');
 }
 
+export const YOUTUBE_TERMS = 'https://www.youtube.com/t/terms';
+export const GOOGLE_PRIVACY = 'https://policies.google.com/privacy';
+const legal = (miniAppUrl: string, page: 'terms' | 'privacy') => new URL(`/${page}.html`, miniAppUrl).toString();
+
+export function termsMessage(miniAppUrl: string): { text: string; keyboard: InlineKeyboard } {
+  const text = [
+    '<b>AURIS</b> — слышать каждую ноту.',
+    '',
+    'Перед началом примите условия. AURIS использует YouTube API Services и Jamendo.',
+    `• <a href="${legal(miniAppUrl, 'terms')}">Условия использования AURIS</a> — продолжая, вы также соглашаетесь с <a href="${YOUTUBE_TERMS}">Условиями использования YouTube</a>.`,
+    `• <a href="${legal(miniAppUrl, 'privacy')}">Политика конфиденциальности AURIS</a> — и <a href="${GOOGLE_PRIVACY}">Политика конфиденциальности Google</a>.`,
+  ].join('\n');
+  return { text, keyboard: new InlineKeyboard().text('Принимаю условия', 'terms!') };
+}
+
 export function recognitionMessage(r: Recognition, miniAppUrl: string): { text: string; keyboard: InlineKeyboard } {
   const lines = [`🎧 <b>${esc(r.title)}</b>`, esc(r.artist)];
   if (r.album) lines.push(`<i>${esc(r.album)}</i>`);
-  if (r.unavailableReason) lines.push('', esc(r.unavailableReason));
   const kb = new InlineKeyboard();
+  // Never starts playback: the user decides. YouTube search opens in the Mini App's YouTube section.
+  if (canWebApp(miniAppUrl)) kb.webApp('Найти на YouTube', appUrl(miniAppUrl, { screen: 'search', q: `${r.artist} ${r.title}`.slice(0, 120), source: 'youtube' }));
   if (r.track && r.track.playback.kind !== 'none') {
+    kb.row();
     if (canWebApp(miniAppUrl)) kb.webApp('▶ Слушать в AURIS', appUrl(miniAppUrl, { track: r.track.id }));
-    kb.text('♥ В избранное', `like:${r.track.id}`).row();
-    if (r.track.downloadable) kb.text('⬇ Скачать в Telegram', `dl:${r.track.id}`);
-    else kb.text('Скачивание недоступно', `nodl:${r.track.id}`);
+    if (!r.track.youtube?.madeForKids) kb.text('♥ В избранное', `like:${r.track.id}`);
   }
   return { text: lines.join('\n'), keyboard: kb };
 }
+
+const welcome =
+  '<b>AURIS</b> — слышать каждую ноту.\n\nИщите музыку на YouTube и Jamendo, включайте бесконечный «Резонанс» и узнавайте песни вокруг — прямо в Telegram.\n\nПришлите голосовое или аудиофайл — я распознаю трек.';
 
 export function createBot(api: AurisApi, cfg: BotConfig): Bot {
   const bot = new Bot(cfg.token, cfg.botInfo ? { botInfo: cfg.botInfo } : undefined);
@@ -96,11 +112,11 @@ export function createBot(api: AurisApi, cfg: BotConfig): Bot {
         reply_markup: openKeyboard(cfg.miniAppUrl, 'Открыть плейлист', { join: token }),
       });
     }
-    const text =
-      payload === 'download'
-        ? 'Готово — теперь я могу присылать вам файлы. Вернитесь в AURIS и нажмите «Скачать в Telegram» ещё раз.'
-        : '<b>AURIS</b> — слышать каждую ноту.\n\nСлушайте музыку, включайте бесконечный «Резонанс» и узнавайте песни вокруг — прямо в Telegram.\n\nПришлите голосовое или аудиофайл — я распознаю трек.';
-    await ctx.reply(text, { parse_mode: 'HTML', reply_markup: openKeyboard(cfg.miniAppUrl, 'Открыть AURIS') });
+    if (!(await api.termsAccepted(ctx.from!.id).catch(() => false))) {
+      const m = termsMessage(cfg.miniAppUrl);
+      return ctx.reply(m.text, { parse_mode: 'HTML', reply_markup: m.keyboard, link_preview_options: { is_disabled: true } });
+    }
+    await ctx.reply(welcome, { parse_mode: 'HTML', reply_markup: openKeyboard(cfg.miniAppUrl, 'Открыть AURIS') });
   });
 
   bot.command('wave', async (ctx) => {
@@ -115,13 +131,10 @@ export function createBot(api: AurisApi, cfg: BotConfig): Bot {
     const q = ctx.match?.trim();
     if (!q) return ctx.reply('Напишите, что найти: <code>/search название или артист</code>', { parse_mode: 'HTML' });
     if (q.length > 120) return ctx.reply('Слишком длинный запрос.');
-    try {
-      const tracks = await api.search(ctx.from!.id, q);
-      if (!tracks.length) return ctx.reply(`Ничего не нашлось по запросу «${esc(q)}». Попробуйте иначе.`, { parse_mode: 'HTML' });
-      await ctx.reply(tracks.map(trackLine).join('\n'), { parse_mode: 'HTML', reply_markup: trackKeyboard(tracks, cfg.miniAppUrl) });
-    } catch {
-      await ctx.reply('Поиск сейчас недоступен. Попробуйте позже.');
-    }
+    await ctx.reply(`Поиск: «${esc(q)}». Результаты YouTube и Jamendo — в AURIS.`, {
+      parse_mode: 'HTML',
+      reply_markup: openKeyboard(cfg.miniAppUrl, '🔍 Открыть результаты', { screen: 'search', q }),
+    });
   });
 
   bot.command('liked', async (ctx) => {
@@ -130,8 +143,8 @@ export function createBot(api: AurisApi, cfg: BotConfig): Bot {
       const tracks = await api.liked(ctx.from!.id);
       if (!tracks.length) return ctx.reply('В избранном пока пусто. Нажимайте ♥ в плеере или в поиске.', { reply_markup: openKeyboard(cfg.miniAppUrl, 'Открыть AURIS') });
       await ctx.reply(`<b>Избранное</b>\n${tracks.map(trackLine).join('\n')}`, { parse_mode: 'HTML', reply_markup: trackKeyboard(tracks, cfg.miniAppUrl) });
-    } catch {
-      await ctx.reply('Избранное сейчас недоступно. Попробуйте позже.');
+    } catch (e) {
+      await ctx.reply(e instanceof ApiCallError && e.code === 'TERMS_REQUIRED' ? 'Сначала примите условия: /start' : 'Избранное сейчас недоступно. Попробуйте позже.');
     }
   });
 
@@ -146,25 +159,18 @@ export function createBot(api: AurisApi, cfg: BotConfig): Bot {
     try {
       await api.like(ctx.from.id, ctx.match[1]!);
       await ctx.answerCallbackQuery({ text: 'Добавлено в избранное ♥' });
-    } catch {
-      await ctx.answerCallbackQuery({ text: 'Не удалось добавить', show_alert: true });
-    }
-  });
-  bot.callbackQuery(/^dl:(.+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery({ text: 'Отправляю файл…' });
-    try {
-      await api.download(ctx.from.id, ctx.match[1]!);
     } catch (e) {
-      const msg = e instanceof ApiCallError ? e.message : 'Не удалось отправить файл';
-      await ctx.reply(`⚠ ${msg}`);
+      await ctx.answerCallbackQuery({ text: e instanceof ApiCallError ? e.message : 'Не удалось добавить', show_alert: true });
     }
   });
-  bot.callbackQuery(/^nodl:/, (ctx) =>
-    ctx.answerCallbackQuery({ text: 'Скачивание этого трека не разрешено источником или лицензией. Его можно только слушать.', show_alert: true }),
-  );
+  bot.callbackQuery('terms!', async (ctx) => {
+    await api.acceptTerms(ctx.from.id);
+    await ctx.answerCallbackQuery({ text: 'Спасибо! Условия приняты.' });
+    await ctx.editMessageText(welcome, { parse_mode: 'HTML', reply_markup: openKeyboard(cfg.miniAppUrl, 'Открыть AURIS') });
+  });
   bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery({ text: 'Откройте AURIS через кнопку меню' }));
   bot.callbackQuery('noapp', (ctx) =>
-    ctx.answerCallbackQuery({ text: 'Mini App ещё не опубликован по HTTPS. Пока работают команды бота: /search, /liked, /settings и распознавание голосовых.', show_alert: true }),
+    ctx.answerCallbackQuery({ text: 'Mini App ещё не опубликован по HTTPS. Пока работают /liked, /settings и распознавание голосовых.', show_alert: true }),
   );
   bot.callbackQuery('reset', (ctx) =>
     ctx.editMessageText('Сбросить рекомендации? История прослушиваний будет удалена, избранное останется.', {
@@ -176,13 +182,13 @@ export function createBot(api: AurisApi, cfg: BotConfig): Bot {
     await ctx.editMessageText('Рекомендации сброшены. «Резонанс» начнёт с чистого листа.');
   });
   bot.callbackQuery('del', (ctx) =>
-    ctx.editMessageText('Удалить все ваши данные из AURIS? Избранное, плейлисты, история и найденные треки будут стёрты без возможности восстановления.', {
+    ctx.editMessageText('Удалить все ваши данные из AURIS? Избранное, плейлисты, история и найденные треки будут стёрты сразу и без возможности восстановления. Ваш аккаунт и данные на YouTube это не затрагивает.', {
       reply_markup: new InlineKeyboard().text('Удалить навсегда', 'del!').text('Отмена', 'cancel'),
     }),
   );
   bot.callbackQuery('del!', async (ctx) => {
     await api.deleteUser(ctx.from.id);
-    await ctx.editMessageText('Готово. Все ваши данные удалены.');
+    await ctx.editMessageText('Готово. Все ваши данные в AURIS удалены. Данные на YouTube это не затрагивает — ими управляет Google: myaccount.google.com.');
   });
   bot.callbackQuery('cancel', (ctx) => ctx.editMessageText('Отменено.'));
 
@@ -216,6 +222,10 @@ export function createBot(api: AurisApi, cfg: BotConfig): Bot {
               ? 'Сервис распознавания сейчас недоступен. Попробуйте позже.'
               : e.message
           : 'Что-то пошло не так. Попробуйте ещё раз.';
+      if (e instanceof ApiCallError && e.code === 'TERMS_REQUIRED') {
+        const m = termsMessage(cfg.miniAppUrl);
+        return ctx.api.editMessageText(ctx.chat.id, status.message_id, m.text, { parse_mode: 'HTML', reply_markup: m.keyboard, link_preview_options: { is_disabled: true } });
+      }
       await ctx.api.editMessageText(ctx.chat.id, status.message_id, text);
     }
   });

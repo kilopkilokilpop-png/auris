@@ -1,14 +1,14 @@
 import type { Album, Artist, Genre, License, QualityTier, Track } from '@auris/shared';
 import { fetchJson, OutboundLimiter, TtlCache, UpstreamError } from '../../lib/http.js';
 import { canonicalGenre, GENRE_NAMES_RU } from './genres.js';
-import { stripPrefix, type DownloadDecision, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
+import { stripPrefix, type MusicProvider, type ProviderInfo, type RecognizedHint, type SearchResult, type StreamSource } from './MusicProvider.js';
 
 /**
  * Jamendo API v3 (https://developer.jamendo.com/v3.0). Full-length Creative Commons tracks.
  * Terms (devportal.jamendo.com/api_terms_of_use, read 2026-11): free for NON-COMMERCIAL use;
  * must credit artists + Jamendo with a backlink; no app "specifically designed to cache content
- * or offer offline access"; downloads only where the artist allows it — the per-track
- * `audiodownload_allowed` flag (since 2021). Commercial use requires a Jamendo licence.
+ * or offer offline access". AURIS offers no downloads at all; every track shows author, licence link
+ * and a backlink. Tracks without a recognised CC licence are disabled. Commercial use requires a Jamendo licence.
  */
 const P = 'jamendo';
 const BASE = 'https://api.jamendo.com/v3.0';
@@ -26,9 +26,7 @@ export interface JmTrack {
   album_image?: string;
   image?: string;
   audio?: string;
-  audiodownload?: string;
-  audiodownload_allowed?: boolean;
-  license_ccurl?: string;
+    license_ccurl?: string;
   shareurl?: string;
   musicinfo?: { tags?: { genres?: string[]; vartags?: string[] } };
   position?: number;
@@ -48,18 +46,12 @@ export function licenseFromCcUrl(url?: string): { name: string; isCreativeCommon
 }
 
 /**
- * Per-track download rule. Allowed only when ALL are true:
- * - artist enabled download (`audiodownload_allowed === true`) and Jamendo returned a URL;
- * - the track carries a recognised Creative Commons licence (all CC licences allow verbatim non-commercial sharing with attribution).
- * Anything missing -> deny (rights unknown).
+ * Per-track licence check for streaming inside a NON-COMMERCIAL app.
+ * Every Creative Commons licence (incl. NC and ND) allows playing the work unchanged, non-commercially,
+ * with attribution. A track without a recognised CC licence is disabled (rights unknown => deny).
  */
-export function jamendoDownloadRule(t: Pick<JmTrack, 'audiodownload_allowed' | 'audiodownload' | 'license_ccurl'>):
-  | { ok: true }
-  | { ok: false; code: 'license_forbids' | 'rights_unknown'; reason: string } {
-  if (t.audiodownload_allowed === false) return { ok: false, code: 'license_forbids', reason: 'Артист запретил скачивание этого трека' };
-  if (t.audiodownload_allowed !== true || !t.audiodownload) return { ok: false, code: 'rights_unknown', reason: 'Jamendo не подтвердил право на скачивание' };
-  if (!licenseFromCcUrl(t.license_ccurl).isCreativeCommons) return { ok: false, code: 'rights_unknown', reason: 'Лицензия трека не подтверждена' };
-  return { ok: true };
+export function jamendoLicenseRule(t: Pick<JmTrack, 'license_ccurl'>): { ok: true } | { ok: false; reason: string } {
+  return licenseFromCcUrl(t.license_ccurl).isCreativeCommons ? { ok: true } : { ok: false, reason: 'Лицензия трека не подтверждена — он отключён' };
 }
 
 /** Jamendo returns raw counters (no 0..1 score): log-scale listens + downloads into 0..1. */
@@ -76,8 +68,7 @@ export class JamendoProvider implements MusicProvider {
     name: 'Jamendo',
     fullStreams: true,
     previewsOnly: false,
-    downloads: true,
-    notice: 'Jamendo: полные треки независимых артистов по лицензиям Creative Commons. Скачивание — только если артист его разрешил.',
+    notice: 'Jamendo: полные треки независимых артистов по лицензиям Creative Commons. Автор, лицензия и ссылка на Jamendo — у каждого трека.',
     maxTier: 'standard',
     tiers: { standard: 'MP3 VBR' },
   };
@@ -86,7 +77,6 @@ export class JamendoProvider implements MusicProvider {
 
   constructor(
     private readonly clientId: string,
-    private readonly cacheFileId: boolean,
     private readonly fetcher: typeof fetchJson = fetchJson,
     private readonly retries = 5,
   ) {}
@@ -121,7 +111,7 @@ export class JamendoProvider implements MusicProvider {
 
   private trackParams(extra: Record<string, string | number>) {
     // Only ONE include: combining "musicinfo stats" makes filtered queries (album_id, tags) return nothing.
-    return { include: 'musicinfo', audioformat: 'mp32', audiodlformat: 'mp32', imagesize: 600, ...extra };
+    return { include: 'musicinfo', audioformat: 'mp32', imagesize: 600, ...extra };
   }
 
   /** Lists ordered by popularity: rank -> 0.5..1 (Jamendo gives no score with our include). */
@@ -131,7 +121,7 @@ export class JamendoProvider implements MusicProvider {
 
   toTrack(t: JmTrack): Track {
     const lic = licenseFromCcUrl(t.license_ccurl);
-    const rule = jamendoDownloadRule(t);
+    const rule = jamendoLicenseRule(t);
     const license: License = {
       name: lic.name,
       url: t.license_ccurl,
@@ -149,12 +139,12 @@ export class JamendoProvider implements MusicProvider {
       genres: (t.musicinfo?.tags?.genres ?? []).map(canonicalGenre),
       tags: t.musicinfo?.tags?.vartags ?? [],
       popularity: t.stats ? jamendoPopularity(t.stats) : 0.4,
-      playback: t.audio
+      playback: !rule.ok
+        ? { kind: 'none', playableSec: 0, qualities: [], note: rule.reason }
+        : t.audio
         ? { kind: 'full', playableSec: t.duration, qualities: [{ tier: 'standard', codec: 'mp3', lossless: false }] }
         : { kind: 'none', playableSec: 0, qualities: [], note: 'Jamendo не отдаёт поток для этого трека' },
       license,
-      downloadable: rule.ok,
-      downloadNote: rule.ok ? undefined : rule.reason,
     };
   }
   private toArtist(a: JmArtist): Artist {
@@ -274,21 +264,6 @@ export class JamendoProvider implements MusicProvider {
     const t = await this.rawTrack(id);
     if (!t?.audio) return null;
     return { url: t.audio, mime: 'audio/mpeg', kind: 'full', playableSec: t.duration, tier: 'standard' };
-  }
-
-  async getDownload(id: string): Promise<DownloadDecision> {
-    // Always fresh: the artist may have revoked download permission.
-    const t = await this.rawTrack(id, true);
-    if (!t) return { allowed: false, code: 'not_found', reason: 'Трек не найден на Jamendo' };
-    const rule = jamendoDownloadRule(t);
-    if (!rule.ok) return { allowed: false, code: rule.code, reason: rule.reason };
-    const lic = licenseFromCcUrl(t.license_ccurl);
-    return {
-      allowed: true,
-      source: { url: t.audiodownload!, mime: 'audio/mpeg', filename: `${t.artist_name} — ${t.name}.mp3` },
-      cacheFileId: this.cacheFileId,
-      attribution: `${t.artist_name} — ${t.name}\n${lic.name}: ${t.license_ccurl}\nИсточник: Jamendo ${t.shareurl ?? ''}`.trim(),
-    };
   }
 
   async match(hint: RecognizedHint) {

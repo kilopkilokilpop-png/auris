@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const open = async (page: Page, uid: number, extra = '') => {
-  await page.goto(`/?uid=${uid}${extra}`);
+  await page.goto(`/?uid=${uid}&terms=1${extra}`);
   await expect(page.getByRole('tab', { name: 'Главная' })).toBeVisible();
 };
 const audioState = (page: Page) =>
@@ -54,34 +54,38 @@ test('quality switch: Hi-Res uses a real 24/96 FLAC stream', async ({ page }) =>
   await expect(page.getByRole('dialog', { name: 'Плеер' }).getByText('HI-RES · 24/96')).toBeVisible();
 });
 
-test('search: results, recent queries, track menu with honest download state', async ({ page }) => {
+test('search: separate YouTube and catalogue sections, recent queries, track menu without downloads', async ({ page }) => {
   await open(page, 2004);
   await page.getByRole('button', { name: 'Поиск' }).click();
   await expect(page.getByRole('heading', { name: 'Популярное сейчас' })).toBeVisible();
   const searched = page.waitForResponse((r) => r.url().includes('/api/search?q='));
   await page.getByRole('searchbox').fill('напряжение');
   await searched;
-  await expect(page.getByRole('heading', { name: 'Треки' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Высокое напряжение,/ })).toBeVisible();
+  const demo = page.getByRole('region', { name: 'Результаты: Демо-каталог AURIS' });
+  await expect(demo.getByRole('button', { name: /^Высокое напряжение,/ })).toBeVisible();
+  // YouTube is its own section with attribution and a link back to YouTube; never mixed into other results.
+  const yt = page.getByRole('region', { name: 'Результаты: YouTube' });
+  await expect(yt.getByText('Результаты YouTube')).toBeVisible();
+  await expect(yt.getByRole('link', { name: /Открыть на YouTube/ })).toHaveAttribute('href', /youtube\.com\/results/);
+  expect(await demo.locator('.row').filter({ hasText: 'Rick Astley' }).count()).toBe(0);
   await page.getByRole('searchbox').fill('zzzzqqq');
   await expect(page.getByText('Ничего не нашлось')).toBeVisible();
   await page.getByRole('button', { name: 'Очистить', exact: true }).click();
   await expect(page.getByRole('button', { name: 'напряжение', exact: true })).toBeVisible();
-  // Track menu: download goes through the server; without a bot token we get a clear message.
+  // Track menu: no download anywhere.
   await page.getByRole('button', { name: 'Действия: Тихий час' }).click();
   const sheet = page.getByRole('dialog', { name: 'Действия с треком' });
-  await expect(sheet.getByText('Скачать в Telegram')).toBeVisible();
-  await sheet.getByText('Скачать в Telegram').click();
-  await expect(page.getByRole('status').filter({ hasText: /BOT_TOKEN|Бот ещё не настроен/ })).toBeVisible();
+  await expect(sheet.getByText('Добавить в плейлист')).toBeVisible();
+  await expect(sheet.getByText(/Скачать/)).toHaveCount(0);
 });
 
 test('likes show up in profile with real counters', async ({ page }) => {
-  await open(page, 2005, '&master=1');
+  await open(page, 2005);
   await page.getByRole('button', { name: 'Поиск' }).click();
   await page.getByRole('button', { name: 'Действия: Ток' }).click();
   await page.getByRole('dialog').getByText('В избранное').click();
   await page.getByRole('tab', { name: 'Профиль' }).click();
-  await expect(page.getByText('AURIS MASTER')).toBeVisible();
+  await expect(page.getByText('AURIS MASTER')).toHaveCount(0);
   await expect(page.locator('.stat').first()).toContainText('1');
   await expect(page.getByRole('button', { name: /^Ток, Мира Вольт/ })).toBeVisible();
 });
@@ -124,9 +128,9 @@ test('Слух: records from the (fake) microphone and shows the result with act
   const r = await req;
   expect(r.headers()['content-type']).toMatch(/multipart\/form-data/);
   await expect(page.getByText('Найдено')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('button', { name: /^Слушать/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Найти на YouTube' })).toBeVisible();
   await expect(page.getByRole('button', { name: /В избранное/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Скачать в Telegram' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Скачать/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Распознать ещё' }).click();
   await expect(page.getByText('Недавно найденные')).toBeVisible();
   await expect(page.locator('.list .row')).toHaveCount(1);
@@ -154,20 +158,20 @@ test('settings: reset recommendations and delete all data', async ({ page }) => 
   await expect(page.getByRole('status').filter({ hasText: 'Рекомендации сброшены' })).toBeVisible();
   await page.getByRole('button', { name: /Удалить все мои данные/ }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Удалить навсегда' }).click();
+  const reloaded = page.waitForEvent('load');
   await expect(page.getByRole('status').filter({ hasText: 'Данные удалены' })).toBeVisible();
+  // The app starts over (consent is asked again for real users; this test URL pre-accepts it).
+  await reloaded;
 });
 
-test('forbidden download is refused by the API even when called directly', async ({ page, request }) => {
+test('there is no download API at all', async ({ page, request }) => {
   await open(page, 2010);
   const initData = await page.evaluate(async () => (await (await fetch('/api/dev/init-data?id=2010')).json()).initData as string);
-  const r = await request.post('/api/downloads', { headers: { authorization: `tma ${initData}` }, data: { trackId: 'deezer:3135556' } });
-  // Not in the active catalogue (mock only) -> 404; with Deezer enabled -> 403 DOWNLOAD_FORBIDDEN (see API tests).
-  expect([403, 404]).toContain(r.status());
-  const unauth = await request.post('/api/downloads', { data: { trackId: 'mock:t1' } });
-  expect(unauth.status()).toBe(401);
+  const r = await request.post('/api/downloads', { headers: { authorization: `tma ${initData}` }, data: { trackId: 'mock:t1' } });
+  expect(r.status()).toBe(404);
 });
 
-test('volume and like work from the mini player, download sits in the full player', async ({ page }) => {
+test('volume and like work from the mini player; the full player has no download button', async ({ page }) => {
   await open(page, 2101);
   await page.getByRole('button', { name: 'Слушать Полярный свет' }).click();
   const mini = page.getByRole('region', { name: 'Сейчас играет' });
@@ -183,13 +187,11 @@ test('volume and like work from the mini player, download sits in the full playe
   await expect.poll(() => page.evaluate(() => document.querySelector('audio')!.volume)).toBeCloseTo(0.8, 2);
   await vol.getByRole('button', { name: 'Громче' }).click();
   await expect.poll(() => page.evaluate(() => document.querySelector('audio')!.volume)).toBeCloseTo(0.9, 2);
-  // Full player: volume slider + download button
+  // Full player: volume slider; author, licence and source links; no download.
   await mini.getByRole('button', { name: /Открыть плеер/ }).click();
   const player = page.getByRole('dialog', { name: 'Плеер' });
   await expect(player.getByRole('group', { name: 'Громкость' })).toBeVisible();
-  await player.getByRole('button', { name: 'Скачать в Telegram' }).click();
-  // No bot token in this test run: the server explains instead of failing silently.
-  await expect(page.getByRole('status').filter({ hasText: /Бот ещё не настроен|BOT_TOKEN/ })).toBeVisible();
+  await expect(player.getByRole('button', { name: /Скачать/ })).toHaveCount(0);
 });
 
 test('curated collections open from home', async ({ page }) => {
@@ -228,7 +230,7 @@ test('playlists: create, add a track, invite friends, a friend joins by link', a
 
   const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const friend = await ctx2.newPage();
-  await friend.goto(`/?uid=2104&join=${token}`);
+  await friend.goto(`/?uid=2104&terms=1&join=${token}`);
   const sheet = friend.getByRole('dialog', { name: 'Плейлист «Дорога домой»' });
   await expect(sheet).toBeVisible();
   await sheet.getByRole('button', { name: 'Присоединиться' }).click();
@@ -238,4 +240,65 @@ test('playlists: create, add a track, invite friends, a friend joins by link', a
   // A friend cannot remove the owner's track (no remove button), the owner can
   await expect(fpl.getByRole('button', { name: 'Убрать из плейлиста: Тихий час' })).toHaveCount(0);
   await ctx2.close();
+});
+
+test('consent: a new user must accept the terms (with YouTube ToS and Google Privacy Policy) first', async ({ page }) => {
+  await page.goto('/?uid=2201');
+  await expect(page.getByRole('heading', { name: 'Перед началом' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Главная' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Условиями использования YouTube' })).toHaveAttribute('href', 'https://www.youtube.com/t/terms');
+  await expect(page.getByRole('link', { name: 'Политике конфиденциальности Google' })).toHaveAttribute('href', 'https://policies.google.com/privacy');
+  await page.getByRole('button', { name: 'Политика конфиденциальности AURIS' }).click();
+  await expect(page.getByText('YouTube API Services').first()).toBeVisible();
+  await page.getByRole('button', { name: '← Назад' }).click();
+  await page.getByRole('button', { name: 'Принимаю и продолжаю' }).click();
+  await expect(page.getByRole('tab', { name: 'Главная' })).toBeVisible();
+});
+
+/** Every point of the iframe's box must hit the iframe itself: nothing is drawn over the YouTube player. */
+const uncovered = (page: Page) =>
+  page.evaluate(() => {
+    const f = document.querySelector('[data-testid="youtube-player"] iframe') as HTMLIFrameElement | null;
+    if (!f) return { ok: false, bad: ['no iframe'], w: 0, h: 0 };
+    const r = f.getBoundingClientRect();
+    const pts: [number, number][] = [];
+    for (const fx of [0.02, 0.25, 0.5, 0.75, 0.98]) for (const fy of [0.02, 0.5, 0.98]) pts.push([r.left + r.width * fx, r.top + r.height * fy]);
+    const bad = pts.map(([x, y]) => document.elementFromPoint(x, y)).filter((e) => e !== f).map((e) => (e ? `${e.tagName}.${e.className}` : 'null'));
+    return { ok: bad.length === 0, bad, w: r.width, h: r.height, top: r.top, vh: innerHeight };
+  });
+
+test('YouTube: official visible player ≥ 200×200, nothing over it, stops when hidden or closed, no mini-player', async ({ page }) => {
+  await open(page, 2202);
+  await page.getByRole('button', { name: 'Поиск' }).click();
+  await page.getByRole('searchbox').fill('Rick Astley');
+  const yt = page.getByRole('region', { name: 'Результаты: YouTube' });
+  await yt.getByRole('button', { name: /^Rick Astley - Never Gonna Give You Up/ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Плеер YouTube' });
+  await expect(dlg).toBeVisible();
+  const frame = dlg.locator('[data-testid="youtube-player"] iframe');
+  await expect(frame).toHaveAttribute('src', /^https:\/\/www\.youtube\.com\/embed\/dQw4w9WgXcQ\?.*origin=http%3A%2F%2Flocalhost/);
+  const box = await uncovered(page);
+  expect(box.w).toBeGreaterThanOrEqual(200);
+  expect(box.h).toBeGreaterThanOrEqual(200);
+  expect(box.ok, JSON.stringify(box)).toBe(true);
+  // Source attribution, no quality badges, no seek bar / volume of our own, no download.
+  await expect(dlg.getByRole('link', { name: 'Источник: YouTube ↗' })).toHaveAttribute('href', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  await expect(dlg.getByText(/HI-RES|FLAC|24\/96|MP3/)).toHaveCount(0);
+  await expect(dlg.getByRole('slider')).toHaveCount(0);
+  await expect(dlg.getByRole('button', { name: /Скачать/ })).toHaveCount(0);
+  // The Mini App goes to the background -> the YouTube player is paused.
+  const state = () => page.evaluate(() => (window as unknown as { __auris: { player: { state: { playing: boolean } } } }).__auris.player.state.playing);
+  await expect.poll(state, { timeout: 30_000 }).toBe(true);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(state, { timeout: 10_000 }).toBe(false);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  });
+  // Leaving the screen stops playback: the iframe is gone and there is no mini-player for YouTube.
+  await dlg.getByRole('button', { name: /Свернуть плеер/ }).click();
+  await expect(page.locator('[data-testid="youtube-player"]')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Сейчас играет' })).toHaveCount(0);
 });

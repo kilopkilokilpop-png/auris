@@ -41,16 +41,13 @@ for (const p of music.providers) {
   });
   await step('genres', async () => `${(await p.getGenres()).length} genres`);
   await step('stream', async () => {
+    if (p.info.id === 'youtube') return 'embed only (official IFrame player), no stream by design';
     const s = await p.getStream(firstId, 'standard');
     if (!s) throw new Error('no stream');
     if (s.filePath) return `local file ${s.kind}`;
     const r = await fetch(s.url, { headers: { range: 'bytes=0-4095' } });
     const b = Buffer.from(await r.arrayBuffer());
     return `${s.kind} ${s.playableSec}s, HTTP ${r.status}, ${r.headers.get('content-type')}, ${b.length} bytes, mp3=${b.subarray(0, 3).toString() === 'ID3' || b[0] === 0xff}`;
-  });
-  await step('download decision', async () => {
-    const d = await p.getDownload(firstId);
-    return d.allowed ? `allowed, cache file_id=${d.cacheFileId}` : `denied (${d.code}): ${d.reason}`;
   });
   await step('match by ISRC/title', async () => {
     const t = await p.match({ title: 'Harder, Better, Faster, Stronger', artist: 'Daft Punk', isrc: 'GBDUW0000059' });

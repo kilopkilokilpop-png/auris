@@ -24,7 +24,7 @@ const voicePath = path.join(os.tmpdir(), 'auris-voice.ogg');
 if (!fs.existsSync(voicePath)) execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=523:duration=8', '-c:a', 'libopus', voicePath]);
 
 describe('Слух via bot voice message', () => {
-  it('recognises a voice note, replies with actions, and the download button sends audio', async () => {
+  it('recognises a voice note and replies with YouTube search + favourite actions, never a file', async () => {
     const realFetch = globalThis.fetch;
     vi.stubGlobal('fetch', (async (url: string | URL, init?: RequestInit) =>
       String(url).startsWith('https://api.telegram.org/file/') ? new Response(fs.readFileSync(voicePath)) : realFetch(url, init)) as typeof fetch);
@@ -48,15 +48,11 @@ describe('Слух via bot voice message', () => {
     expect(edit, JSON.stringify(calls)).toBeTruthy();
     expect(String(edit.payload.text)).toMatch(/🎧/);
     const buttons = JSON.stringify(edit.payload.reply_markup);
-    const dl = /"dl:(mock:t\d+)"/.exec(buttons);
-    expect(dl).toBeTruthy();
+    expect(buttons).toContain('Найти на YouTube');
+    expect(buttons).toMatch(/"like:mock:t\d+"/);
+    expect(buttons).not.toMatch(/dl:|Скачать/);
+    expect(calls.some((c) => c.method === 'sendAudio' || c.method === 'sendDocument')).toBe(false);
     const hist = await ctx.db.query<{ source: string }>('SELECT source FROM recognitions WHERE user_id=4242');
     expect(hist.rows[0]!.source).toBe('bot');
-
-    // Press "⬇ Скачать в Telegram"
-    await bot.handleUpdate({ update_id: 2, callback_query: { id: 'q', from, chat_instance: 'c', data: `dl:${dl![1]}`, message: { message_id: 10, date: 0, chat, text: 'x' } } });
-    const sent = ctx.sender.calls.at(-1)!;
-    expect(sent.chatId).toBe(4242);
-    expect(sent.meta.caption).toMatch(/CC0/);
   });
 });

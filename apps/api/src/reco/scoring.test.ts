@@ -18,7 +18,6 @@ function track(id: string, artist: string, extra: Partial<Track> = {}): Track {
     popularity: 0.5,
     playback: { kind: 'full', playableSec: 200, qualities: [] },
     license: { name: 'CC0' },
-    downloadable: false,
     ...extra,
   };
 }

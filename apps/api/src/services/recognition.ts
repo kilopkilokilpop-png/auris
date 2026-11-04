@@ -17,6 +17,8 @@ export class RecognitionService {
       hasFfmpeg: boolean;
       perDay: number;
       perMinute: number;
+      /** Service-wide cap on paid recognition calls per day (0 = no cap). */
+      dailyBudget?: number;
     },
   ) {}
 
@@ -51,7 +53,12 @@ export class RecognitionService {
           throw new AppError('AUDIO_INVALID', 'Не удалось прочитать запись. Попробуйте ещё раз.', 422);
         }
       }
+      // Spending cap: counted only for real (uncached) calls to the paid API.
+      if (this.d.dailyBudget && (await this.d.store.bumpService(`recognize:${this.d.provider.name}`)) > this.d.dailyBudget) {
+        throw new AppError('RECOGNITION_UNAVAILABLE', 'Дневной лимит распознаваний AURIS исчерпан. Попробуйте завтра.', 503);
+      }
       try {
+        // The recording exists only in memory for this call; it is never written to disk or logs.
         result = await this.d.provider.recognize(sample, sampleMime);
       } catch (e) {
         if (e instanceof RecognitionUnavailableError) throw new AppError('RECOGNITION_UNAVAILABLE', 'Сервис распознавания сейчас недоступен. Попробуйте позже.', 503);

@@ -9,8 +9,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "db:migrate": "tsx src/db/migrate-cli.ts",
-    "revoke": "tsx src/scripts/revoke.ts"
+    "db:migrate": "tsx src/db/migrate-cli.ts"
   },
   "dependencies": {
     "@auris/shared": "workspace:*",
