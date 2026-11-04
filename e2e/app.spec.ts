@@ -277,6 +277,8 @@ test('YouTube: official visible player ≥ 200×200, nothing over it, stops when
   await expect(dlg).toBeVisible();
   const frame = dlg.locator('[data-testid="youtube-player"] iframe');
   await expect(frame).toHaveAttribute('src', /^https:\/\/www\.youtube\.com\/embed\/dQw4w9WgXcQ\?.*origin=http%3A%2F%2Flocalhost/);
+  // The signed initData (URL hash in Telegram) must never be passed to YouTube.
+  expect(await frame.getAttribute('src')).not.toMatch(/tgWebAppData|hash%3D|auth_date/);
   const box = await uncovered(page);
   expect(box.w).toBeGreaterThanOrEqual(200);
   expect(box.h).toBeGreaterThanOrEqual(200);

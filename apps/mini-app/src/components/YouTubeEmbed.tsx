@@ -15,6 +15,8 @@ const VISIBLE_TO_PLAY = 0.5;
  *  - starts only after a user action or inside the wave the user switched on, and only when > 50 % visible;
  *  - Made for Kids videos load from youtube-nocookie.com (privacy-enhanced, no tracking);
  *  - origin + widget_referrer identify AURIS; the page keeps a Referer (strict-origin-when-cross-origin).
+ *    widget_referrer is origin + path only: inside Telegram the URL hash carries the signed initData, which must
+ *    never leave AURIS (and the long URL makes YouTube refuse the embed).
  * Nothing is rendered above the iframe: AURIS controls live below it.
  */
 export function YouTubeEmbed({ track }: { track: Track }) {
@@ -50,7 +52,7 @@ export function YouTubeEmbed({ track }: { track: Track }) {
           videoId: yt.videoId,
           width: '100%',
           height: '100%',
-          playerVars: { playsinline: 1, rel: 0, enablejsapi: 1, origin: location.origin, widget_referrer: location.href },
+          playerVars: { playsinline: 1, rel: 0, enablejsapi: 1, origin: location.origin, widget_referrer: location.origin + location.pathname },
           events: {
             onReady: () => {
               ready.current = true;

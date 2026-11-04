@@ -89,11 +89,7 @@ export function YouTubePlayerScreen() {
         </p>
       ) : null}
       {reasons?.length ? <p className="reasons">Почему этот трек: {reasons.join(' · ')}</p> : null}
-      {s.error ? (
-        <p className="preview-note" role="alert">
-          {s.error}
-        </p>
-      ) : null}
+      {/* Embed errors are shown right under the player by YouTubeEmbed. */}
 
       <div className="controls glass">
         <div className="transport yt-transport">

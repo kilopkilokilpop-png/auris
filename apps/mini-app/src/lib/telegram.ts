@@ -96,6 +96,9 @@ export async function bootTelegram(): Promise<TgState> {
   state.initData = safe(() => retrieveRawInitData()) ?? '';
   state.startParam = safe(() => retrieveLaunchParams().tgWebAppStartParam);
   if (!state.botUsername) state.botUsername = (import.meta.env.VITE_BOT_USERNAME as string | undefined) ?? null;
+  // The launch params (incl. signed initData) arrive in the URL hash. Once read, drop them from the address:
+  // embedded players (YouTube IFrame API sends the page URL as `forigin`) must never receive them.
+  if (location.hash.includes('tgWebAppData')) safe(() => history.replaceState(history.state, '', location.pathname + location.search));
 
   safe(() => backButton.mount());
   safe(() => miniApp.mountSync());
