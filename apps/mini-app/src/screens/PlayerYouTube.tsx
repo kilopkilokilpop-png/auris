@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { IconChevronDown, IconHeart, IconInfo, IconNext, IconPause, IconPlay, IconPlus, IconPrev, IconThumbDown } from '../components/Icons';
 import { SOURCE_NAMES } from '../components/Source';
+import { VolumeControl } from '../components/Volume';
 import { YouTubeEmbed } from '../components/YouTubeEmbed';
 import { player } from '../lib/player';
 import { closePlayer } from '../lib/router';
@@ -103,6 +104,7 @@ export function YouTubePlayerScreen() {
             <IconNext />
           </button>
         </div>
+        <VolumeControl />
         <p className="yt-hint">
           {s.context?.kind === 'wave' ? 'Резонанс включит следующий трек сам, пока плеер на экране.' : 'Видео играет, пока плеер открыт. Свернёте — воспроизведение остановится.'}
         </p>

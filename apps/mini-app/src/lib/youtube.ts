@@ -11,6 +11,10 @@ export interface YTPlayer {
   getCurrentTime(): number;
   getDuration(): number;
   getPlayerState(): number;
+  /** 0..100 — official IFrame API volume control. */
+  setVolume(v: number): void;
+  mute(): void;
+  unMute(): void;
   destroy(): void;
 }
 export interface YTNamespace {

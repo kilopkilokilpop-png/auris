@@ -286,7 +286,10 @@ test('YouTube: official visible player ≥ 200×200, nothing over it, stops when
   // Source attribution, no quality badges, no seek bar / volume of our own, no download.
   await expect(dlg.getByRole('link', { name: 'Источник: YouTube ↗' })).toHaveAttribute('href', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   await expect(dlg.getByText(/HI-RES|FLAC|24\/96|MP3/)).toHaveCount(0);
-  await expect(dlg.getByRole('slider')).toHaveCount(0);
+  // Only our volume control (official setVolume), no seek bar of our own.
+  await expect(dlg.getByRole('slider')).toHaveCount(1);
+  await dlg.getByRole('group', { name: 'Громкость' }).getByRole('button', { name: 'Тише' }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __auris: { player: { state: { volume: number } } } }).__auris.player.state.volume)).toBeCloseTo(0.9, 2);
   await expect(dlg.getByRole('button', { name: /Скачать/ })).toHaveCount(0);
   // The Mini App goes to the background -> the YouTube player is paused.
   const state = () => page.evaluate(() => (window as unknown as { __auris: { player: { state: { playing: boolean } } } }).__auris.player.state.playing);

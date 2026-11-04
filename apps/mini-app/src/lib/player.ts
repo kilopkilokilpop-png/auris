@@ -43,6 +43,8 @@ export interface PlayerState {
 export interface EmbedController {
   play(): void;
   pause(): void;
+  /** 0..1, through the official player API (the player stays visible). */
+  setVolume(v: number): void;
 }
 
 const initial: PlayerState = {
@@ -137,6 +139,7 @@ class Player {
   setVolume(v: number) {
     const vol = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100;
     this.audio.volume = vol;
+    this.embedCtl?.setVolume(vol);
     this.store.set({ volume: vol });
     try {
       if (vol > 0) localStorage.setItem(VOLUME_KEY, String(vol));

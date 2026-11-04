@@ -54,8 +54,10 @@ export function YouTubeEmbed({ track }: { track: Track }) {
           height: '100%',
           playerVars: { playsinline: 1, rel: 0, enablejsapi: 1, origin: location.origin, widget_referrer: location.origin + location.pathname },
           events: {
-            onReady: () => {
+            onReady: (e) => {
               ready.current = true;
+              // Same volume as the rest of AURIS (official API; iOS keeps the hardware volume).
+              e.target.setVolume(Math.round(player.state.volume * 100));
               loadedId.current = yt.videoId;
               tryStart();
             },
@@ -83,6 +85,13 @@ export function YouTubeEmbed({ track }: { track: Track }) {
             tryStart();
           },
           pause: () => instance.current?.pauseVideo(),
+          setVolume: (v) => {
+            const p = instance.current;
+            if (!p || !ready.current) return;
+            p.setVolume(Math.round(v * 100));
+            if (v > 0) p.unMute();
+            else p.mute();
+          },
         });
         poll = setInterval(() => {
           const p = instance.current;
